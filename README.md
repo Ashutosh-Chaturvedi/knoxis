@@ -1,6 +1,6 @@
 # Knoxis
 
-Dual-mode solar flare forecasting and nowcasting system built on real Aditya-L1 satellite data (ISRO PRADAN portal), developed for ISRO Build-a-thon (BAH) 2026.
+Dual-mode solar flare forecasting and nowcasting system built on real Aditya-L1 satellite data (ISRO PRADAN portal).
 
 ## Overview
 
