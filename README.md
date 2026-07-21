@@ -1,10 +1,10 @@
-# SolarSentinel
+# Knoxis
 
 Dual-mode solar flare forecasting and nowcasting system built on real Aditya-L1 satellite data (ISRO PRADAN portal), developed for ISRO Build-a-thon (BAH) 2026.
 
 ## Overview
 
-SolarSentinel combines soft X-ray (SoLEXS) and hard X-ray (HEL1OS CZT) data from Aditya-L1 to detect and forecast solar flares. Its core novelty is the use of a **Hardness Ratio** (HEL1OS / SoLEXS flux) as a precursor signal — real data from June 21, 2026 shows a ~20-minute hardness-ratio shift preceding two detected flares, ahead of any flux threshold crossing.
+Knoxis combines soft X-ray (SoLEXS) and hard X-ray (HEL1OS CZT) data from Aditya-L1 to detect and forecast solar flares. Its core novelty is the use of a **Hardness Ratio** (HEL1OS / SoLEXS flux) as a precursor signal — real data from June 21, 2026 shows a ~20-minute hardness-ratio shift preceding two detected flares, ahead of any flux threshold crossing.
 
 ## System Design
 
@@ -16,7 +16,7 @@ SolarSentinel combines soft X-ray (SoLEXS) and hard X-ray (HEL1OS CZT) data from
 ## Repository Structure
 
 ```
-solarsentinel/
+Knoxis/
 ├── ingestion/    # SoLEXS + HEL1OS data loaders and preprocessing
 ├── nowcast/      # Threshold-based detection engine
 ├── forecast/     # Random Forest forecasting pipeline
