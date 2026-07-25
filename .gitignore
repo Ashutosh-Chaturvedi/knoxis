@@ -3,3 +3,5 @@ venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/ 
+ingestion/test.ipynb
+ingestion/knoxis.egg-info
