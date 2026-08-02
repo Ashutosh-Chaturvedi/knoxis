@@ -5,3 +5,6 @@ __pycache__/
 .ipynb_checkpoints/ 
 ingestion/test.ipynb
 ingestion/knoxis.egg-info
+tests/
+notebooks/ingestion.py
+notebooks/config.txt
