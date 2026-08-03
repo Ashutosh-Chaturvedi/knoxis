@@ -57,14 +57,12 @@ def compute_rolling_baseline(df: pd.DataFrame, config: NowcastConfig) -> pd.Seri
 def detect_threshold_crossings(
     df: pd.DataFrame, baseline: pd.Series, config: NowcastConfig
 ) -> pd.Series:
-    
     ratio = df["solexs_counts"] / baseline
     is_crossing = (ratio >= config.threshold_ratio) & df["solexs_is_valid"]
     return is_crossing.fillna(False)
 
 
 def enforce_sustained_duration(crossing: pd.Series, config: NowcastConfig) -> pd.Series:
- 
     # Each time `crossing` flips (True->False or False->True), start a new
     # group. Cumulative sum of the flip-indicator gives a unique group id
     # for every contiguous run of identical values.
@@ -101,32 +99,41 @@ def compute_alert_level(
 def check_hel1os_corroboration(
     df: pd.DataFrame, event_start, event_end, config: NowcastConfig
 ) -> str:
-  
     window = df.loc[event_start:event_end]
     valid_window = window[window["hel1os_is_valid"]]
-
     if len(valid_window) == 0:
         return "inconclusive"
 
-    # Simple quiet-reference: median HEL1OS count rate over the whole
-    # dataset's valid rows, as a rough "is this elevated" yardstick.
-    hel1os_quiet = df.loc[df["hel1os_is_valid"], "hel1os_ctr"].median()
-    if hel1os_quiet == 0 or np.isnan(hel1os_quiet):
+    event_duration = event_end - event_start
+    event_sum = valid_window["hel1os_ctr"].sum()
+
+    # Build a reference distribution: rolling sums of the same duration,
+    # computed across the whole day, using only valid HEL1OS samples.
+    valid_series = df["hel1os_ctr"].where(df["hel1os_is_valid"])
+    rolling_sums = valid_series.rolling(event_duration, min_periods=1).sum()
+    # Exclude the event window itself from the reference distribution,
+    # so the event can't inflate its own comparison baseline.
+    reference = rolling_sums.loc[(rolling_sums.index < event_start) | (rolling_sums.index > event_end)]
+    reference = reference.dropna()
+
+    if len(reference) < 100:
         return "inconclusive"
 
-    peak_hel1os = valid_window["hel1os_ctr"].max()
-    if peak_hel1os / hel1os_quiet >= config.hel1os_corroboration_ratio:
-        return "yes"
-    return "no"
+    threshold = reference.quantile(0.90)
+    if threshold == 0:
+        # Even the 90th percentile of quiet-time windowed sums is zero —
+        # any nonzero event sum is meaningfully elevated by comparison.
+        return "yes" if event_sum > 0 else "no"
+
+    return "yes" if event_sum >= threshold else "no"
 
 
 def build_flare_catalog(
     df: pd.DataFrame, baseline: pd.Series, confirmed: pd.Series, config: NowcastConfig
 ) -> pd.DataFrame:
-
     if not confirmed.any():
         return pd.DataFrame(
-            columns=["detection_time", "peak_time", "peak_counts",
+            columns=["detection_time", "end_time", "peak_time", "peak_counts",
                      "goes_class", "hel1os_corroboration"]
         )
 
@@ -139,6 +146,7 @@ def build_flare_catalog(
 
         event_window = df.loc[group_index]
         detection_time = group_index[0]  # first CONFIRMED timestamp
+        end_time = group_index[-1]       # last CONFIRMED timestamp (flux dropped back below threshold after this)
         peak_time = event_window["solexs_counts"].idxmax()
         peak_counts = event_window.loc[peak_time, "solexs_counts"]
         goes_class = classify_flare(peak_counts)
@@ -152,6 +160,7 @@ def build_flare_catalog(
 
         events.append({
             "detection_time": detection_time,
+            "end_time": end_time,
             "peak_time": peak_time,
             "peak_counts": peak_counts,
             "goes_class": goes_class,
@@ -162,7 +171,7 @@ def build_flare_catalog(
 
 
 class NowcastEngine:
-    
+    """Runs the full nowcast pipeline over an ingested SoLEXS+HEL1OS DataFrame."""
 
     def __init__(self, config: NowcastConfig | None = None):
         self.config = config or NowcastConfig()

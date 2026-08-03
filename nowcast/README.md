@@ -73,15 +73,20 @@ Real GOES-equivalent conversion, derived from two matched flares on 2026-06-21 (
 ---
 #### def `check_hel1os_corroboration`
 ---
-- Checks whether HEL1OS was ALSO elevated during a detected event window.
+Checks whether HEL1OS was ALSO elevated during a detected event window.
     This NEVER gates the alert — it's purely informational, logged
-    alongside the event. Returns 'yes', 'no', or 'inconclusive' (the last
-    when HEL1OS data in that window isn't trustworthy per its own
-    is_valid flag — e.g. the known saturation dropout at extreme peaks).
+    alongside the event.
 
-- Note: HEL1OS's own quiet baseline is computed the same way as SoLEXS's,
-    but independently, since the two instruments have very different count
-    rates and are not directly comparable in absolute terms.
+    IMPORTANT: HEL1OS is ~70-80% exact-zero at 1-second resolution (a real,
+    confirmed characteristic of this instrument, not missing data), so the
+    median of raw per-second counts is always zero — comparing against that
+    directly would make this check permanently "inconclusive" on real data.
+    Instead, we compare SUMMED counts over the event window against a
+    distribution of same-duration summed windows across the rest of the day,
+    the same fix that made the Hardness Ratio signal usable.
+
+    Returns 'yes', 'no', or 'inconclusive' (when there isn't enough valid
+    HEL1OS data across the day to build a meaningful reference distribution).
 
 ### Step 5 — build a flare catalog from confirmed events
 ---

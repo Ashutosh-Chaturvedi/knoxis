@@ -4,7 +4,7 @@ Dual-mode solar flare forecasting and nowcasting system built on real Aditya-L1 
 
 ## Overview
 
-Knoxis combines soft X-ray (SoLEXS) and hard X-ray (HEL1OS CZT) data from Aditya-L1 to detect and forecast solar flares. Its core novelty is the use of a **Hardness Ratio** (HEL1OS / SoLEXS flux) as a precursor signal — real data from June 21, 2026 shows a ~20-minute hardness-ratio shift preceding two detected flares, ahead of any flux threshold crossing.
+Knoxis combines soft X-ray (SoLEXS) and hard X-ray (HEL1OS CZT) data from Aditya-L1 to detect and forecast solar flares. For detection we are solely dependent on SoLEXS's data, HEL1OS data is used only to verify the result.  
 
 ## System Design
 
@@ -42,4 +42,5 @@ Python, NumPy, Pandas, astropy, scikit-learn, Matplotlib, Streamlit, FastAPI.
 
 ## Status
 
-Actively in development. Data ingestion pipeline in progress.
+Actively in development. Data Ingestion and Nowcasting feature is done. 
+Collecting data for forecasting model training. 
