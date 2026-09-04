@@ -1,12 +1,9 @@
 """
-build_master_table.py
-
 Step 5: concatenates every labeled per-day parquet into one master
 training table, ready for the time-based train/test split.
 """
 
 from pathlib import Path
-
 import pandas as pd
 
 

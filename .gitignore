@@ -8,3 +8,4 @@ ingestion/knoxis.egg-info
 tests/
 notebooks/ingestion.py
 notebooks/config.txt
+.vscode
