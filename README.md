@@ -39,5 +39,22 @@ Python, pandas, NumPy, astropy, scikit-learn, LightGBM, Matplotlib, FastAPI.
 | Data ingestion | Done |
 | Nowcast engine | Done |
 | Forecast module | Done — see `forecast/README.md` for what it can and can't currently do |
-| API / serving layer | In progress |
-| Dashboard | Not started |
+| API / serving layer | Done |
+| Dashboard | Done (Real-time 1Hz WebSocket streaming monitor) |
+
+## Quickstart — Running the Backend & Dashboard
+
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Start the Knoxis live server:
+   ```bash
+   python -m uvicorn api.app:app --port 8080
+   ```
+
+3. Open your browser:
+   - **Live Mission Dashboard:** [http://localhost:8080/](http://localhost:8080/)
+   - **Interactive API Documentation:** [http://localhost:8080/docs](http://localhost:8080/docs)
+
