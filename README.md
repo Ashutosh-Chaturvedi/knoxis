@@ -40,4 +40,4 @@ Python, pandas, NumPy, astropy, scikit-learn, LightGBM, Matplotlib, FastAPI.
 | Nowcast engine | Done |
 | Forecast module | Done — see `forecast/README.md` for what it can and can't currently do |
 | API / serving layer | In progress |
-| Dashboard | Not started |
+| Dashboard | In progress |
