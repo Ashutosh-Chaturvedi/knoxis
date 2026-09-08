@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Knoxis — Solar Flare Monitor</title>
+<style>
+  :root {
+    --bg: #FFFFFF;
+    --text-primary: #1B1D21;
+    --text-secondary: #6B7078;
+    --line: #D3D6DB;
+    --green: #2E8B57;
+    --yellow: #B8860B;
+    --orange: #C1622E;
+    --red: #C0392B;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    margin: 0;
+    padding: 48px 56px;
+    max-width: 880px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #2E5EAA;
+    margin: -48px -56px 36px -56px;
+    padding: 28px 56px;
+  }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.3px; color: #FFFFFF; }
+  .subtitle { margin: 4px 0 0 0; font-size: 13px; color: #C9D8F2; }
+  #clock { color: #C9D8F2; font-size: 13px; }
+
+  .row {
+    display: flex;
+    padding-bottom: 28px;
+    margin-bottom: 28px;
+    border-bottom: 1px solid var(--line);
+  }
+  .block { flex: 1; }
+  .block + .block {
+    padding-left: 64px;
+    border-left: 1px solid var(--line);
+  }
+  .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+  .alert-level {
+    font-size: 34px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  .detail-line {
+    color: #454A52;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .as-of {
+    color: #9498A0;
+    font-size: 12px;
+    margin-top: 12px;
+  }
+
+  .QUIET { color: var(--green); }
+  .WATCH { color: var(--yellow); }
+  .WARNING { color: var(--orange); }
+  .ALERT { color: var(--red); }
+
+  #error-banner {
+    display: none;
+    background: #FBEAE9;
+    color: #A83226;
+    padding: 12px 18px;
+    border-radius: 6px;
+    margin-bottom: 24px;
+    font-size: 13px;
+  }
+
+  .label-row {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-size: 12px;
+    padding: 0 0 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  td {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+    color: var(--text-primary);
+  }
+  tr:last-child td { border-bottom: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Knoxis</h1>
+    <p class="subtitle">Dual-mode solar flare nowcasting and forecasting system — Aditya-L1 SoLEXS + HEL1OS</p>
+  </div>
+  <span id="clock">2026-06-21 19:32 UTC</span>
+</header>
+
+<div id="error-banner"></div>
+
+<div class="row">
+  <div class="block">
+    <div class="label">Nowcast — happening right now</div>
+    <div class="alert-level" id="nowcast-level">—</div>
+    <div class="detail-line" id="nowcast-detail">Loading…</div>
+    <div class="as-of" id="nowcast-asof"></div>
+  </div>
+
+  <div class="block">
+    <div class="label">Forecast — next 60 minutes</div>
+    <div class="alert-level" id="forecast-level">—</div>
+    <div class="detail-line" id="forecast-detail">Loading…</div>
+    <div class="as-of" id="forecast-asof"></div>
+  </div>
+</div>
+
+<div class="label-row">Recent nowcast detections <span style="text-transform: none; letter-spacing: 0; font-style: italic;">(example data — not yet a live endpoint)</span></div>
+<table>
+  <tr><th>Time</th><th>Peak flux</th><th>Class</th><th>HEL1OS corroboration</th></tr>
+  <tr><td>19:29 UTC</td><td>4931 counts/s</td><td>M6.8</td><td>Yes</td></tr>
+  <tr><td>02:46 UTC</td><td>1886 counts/s</td><td>M2.6</td><td>Yes</td></tr>
+  <tr><td>01:06 UTC</td><td>142 counts/s</td><td>C1.1</td><td>Inconclusive</td></tr>
+</table>
+
+<script>
+  const API_BASE = "http://127.0.0.1:8000";
+  const REFRESH_INTERVAL_MS = 10000;
+
+  function updateClock() {
+    document.getElementById("clock").textContent =
+      new Date().toUTCString().replace("GMT", "UTC");
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  function setLevel(elId, level) {
+    const el = document.getElementById(elId);
+    el.textContent = level || "UNKNOWN";
+    el.className = "alert-level " + (level || "");
+  }
+
+  async function fetchStatus() {
+    const errorBanner = document.getElementById("error-banner");
+    try {
+      const res = await fetch(`${API_BASE}/status`);
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const data = await res.json();
+      errorBanner.style.display = "none";
+
+      const nc = data.nowcast;
+      setLevel("nowcast-level", nc.alert_level);
+      if (nc.note) {
+        document.getElementById("nowcast-detail").textContent = nc.note;
+      } else {
+        const fluxStr = nc.current_flux != null ? nc.current_flux.toFixed(1) : "—";
+        const baseStr = nc.baseline != null ? nc.baseline.toFixed(1) : "—";
+        const classStr = nc.goes_class ? ` — confirmed ${nc.goes_class}` : "";
+        document.getElementById("nowcast-detail").textContent =
+          `Flux ${fluxStr} counts/s (baseline ${baseStr})${classStr}`;
+      }
+      document.getElementById("nowcast-asof").textContent =
+        nc.as_of ? `As of ${nc.as_of}` : "";
+
+      const fc = data.forecast;
+      setLevel("forecast-level", fc.alert_level);
+      if (fc.note) {
+        document.getElementById("forecast-detail").textContent = fc.note;
+      } else {
+        const pct = fc.flare_probability != null
+          ? (fc.flare_probability * 100).toFixed(1) + "%"
+          : "—";
+        document.getElementById("forecast-detail").textContent =
+          `Flare probability ${pct}`;
+      }
+      document.getElementById("forecast-asof").textContent =
+        fc.as_of ? `As of ${fc.as_of}` : "";
+
+    } catch (err) {
+      errorBanner.style.display = "block";
+      errorBanner.textContent =
+        `Could not reach the Knoxis API at ${API_BASE} — is the backend running? (${err.message})`;
+    }
+  }
+
+  fetchStatus();
+  setInterval(fetchStatus, REFRESH_INTERVAL_MS);
+</script>
+
+</body>
+</html>

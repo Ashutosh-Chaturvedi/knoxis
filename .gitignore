@@ -9,3 +9,4 @@ tests/
 notebooks/ingestion.py
 notebooks/config.txt
 .vscode
+.idea
