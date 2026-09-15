@@ -54,7 +54,6 @@ app.add_middleware(
 )
 
 
-
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
@@ -83,11 +82,22 @@ class StatusResponse(BaseModel):
     forecast: ForecastResponse
 
 
+class FlareHistoryEntry(BaseModel):
+    detection_time: datetime
+    peak_time: datetime
+    peak_flux: float
+    goes_class: str
+    hel1os_corroboration: str
+
+
+class FlareHistoryResponse(BaseModel):
+    events: list[FlareHistoryEntry]
+    note: Optional[str] = None
+
 
 def load_current_data() -> pd.DataFrame:
     """Reads the data file fresh. Raises HTTPException (503) if it's
-    missing or unreadable -- a real, honest failure state, not silently
-    returning an empty/default response."""
+    missing or unreadable """
     if not DATA_FILE_PATH.exists():
         raise HTTPException(
             status_code=503,
@@ -95,7 +105,7 @@ def load_current_data() -> pd.DataFrame:
         )
     try:
         df = pd.read_parquet(DATA_FILE_PATH)
-    except Exception as exc: 
+    except Exception as exc:  
         raise HTTPException(status_code=503, detail=f"Data file unreadable: {exc}") from exc
 
     if df.index.name != "timestamp" and "timestamp" in df.columns:
@@ -119,6 +129,7 @@ def compute_nowcast_status(df: pd.DataFrame, engine: NowcastEngine) -> NowcastRe
     goes_class = None
     catalog = result.get("flare_catalog")
     if catalog is not None and len(catalog) > 0:
+       
         last_event = catalog.iloc[-1]
         if last_event["detection_time"] <= latest_ts <= last_event.get("end_time", last_event["detection_time"]):
             goes_class = last_event.get("goes_class")
@@ -130,6 +141,28 @@ def compute_nowcast_status(df: pd.DataFrame, engine: NowcastEngine) -> NowcastRe
         baseline=float(latest_baseline) if not pd.isna(latest_baseline) else None,
         goes_class=goes_class,
     )
+
+
+def compute_flare_history(df: pd.DataFrame, engine: NowcastEngine, max_events: int = 10) -> FlareHistoryResponse:
+    """Reuses the nowcast engine's own flare_catalog"""
+    result = engine.run(df)
+    catalog = result.get("flare_catalog")
+
+    if catalog is None or len(catalog) == 0:
+        return FlareHistoryResponse(events=[], note="No confirmed flare events in the current data window.")
+
+    recent = catalog.sort_values("detection_time", ascending=False).head(max_events)
+    events = [
+        FlareHistoryEntry(
+            detection_time=row["detection_time"].to_pydatetime() if hasattr(row["detection_time"], "to_pydatetime") else row["detection_time"],
+            peak_time=row["peak_time"].to_pydatetime() if hasattr(row["peak_time"], "to_pydatetime") else row["peak_time"],
+            peak_flux=float(row["peak_counts"]),
+            goes_class=str(row["goes_class"]),
+            hel1os_corroboration=str(row["hel1os_corroboration"]),
+        )
+        for _, row in recent.iterrows()
+    ]
+    return FlareHistoryResponse(events=events)
 
 
 def compute_forecast_status(df: pd.DataFrame, model) -> ForecastResponse:
@@ -168,9 +201,7 @@ def compute_forecast_status(df: pd.DataFrame, model) -> ForecastResponse:
     )
 
 
-# --------------------------------------------------------------------- #
-# Endpoints
-# --------------------------------------------------------------------- #
+
 @app.get("/health", response_model=HealthResponse)
 def health():
     return HealthResponse(
@@ -185,6 +216,12 @@ def health():
 def nowcast():
     df = load_current_data()
     return compute_nowcast_status(df, app.state.nowcast_engine)
+
+
+@app.get("/flare-history", response_model=FlareHistoryResponse)
+def flare_history():
+    df = load_current_data()
+    return compute_flare_history(df, app.state.nowcast_engine)
 
 
 @app.get("/forecast", response_model=ForecastResponse)

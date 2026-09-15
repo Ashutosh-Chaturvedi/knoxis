@@ -136,12 +136,12 @@
   </div>
 </div>
 
-<div class="label-row">Recent nowcast detections <span style="text-transform: none; letter-spacing: 0; font-style: italic;">(example data — not yet a live endpoint)</span></div>
+<div class="label-row">Recent nowcast detections</div>
 <table>
-  <tr><th>Time</th><th>Peak flux</th><th>Class</th><th>HEL1OS corroboration</th></tr>
-  <tr><td>19:29 UTC</td><td>4931 counts/s</td><td>M6.8</td><td>Yes</td></tr>
-  <tr><td>02:46 UTC</td><td>1886 counts/s</td><td>M2.6</td><td>Yes</td></tr>
-  <tr><td>01:06 UTC</td><td>142 counts/s</td><td>C1.1</td><td>Inconclusive</td></tr>
+  <tr><th>Detected</th><th>Peak</th><th>Peak flux</th><th>Class</th><th>HEL1OS corroboration</th></tr>
+  <tbody id="history-rows">
+    <tr><td colspan="5">Loading…</td></tr>
+  </tbody>
 </table>
 
 <script>
@@ -204,8 +204,36 @@
     }
   }
 
+  async function fetchFlareHistory() {
+    const tbody = document.getElementById("history-rows");
+    try {
+      const res = await fetch(`${API_BASE}/flare-history`);
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const data = await res.json();
+
+      if (data.events.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5">${data.note || "No recent events."}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = data.events.map(ev => `
+        <tr>
+          <td>${new Date(ev.detection_time).toUTCString().replace("GMT", "UTC")}</td>
+          <td>${new Date(ev.peak_time).toUTCString().replace("GMT", "UTC")}</td>
+          <td>${ev.peak_flux.toFixed(1)} counts/s</td>
+          <td>${ev.goes_class}</td>
+          <td>${ev.hel1os_corroboration.charAt(0).toUpperCase() + ev.hel1os_corroboration.slice(1)}</td>
+        </tr>
+      `).join("");
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="5">Could not load flare history (${err.message})</td></tr>`;
+    }
+  }
+
   fetchStatus();
+  fetchFlareHistory();
   setInterval(fetchStatus, REFRESH_INTERVAL_MS);
+  setInterval(fetchFlareHistory, REFRESH_INTERVAL_MS);
 </script>
 
 </body>
