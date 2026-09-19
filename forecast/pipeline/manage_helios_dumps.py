@@ -20,7 +20,7 @@ partial/failed downloads are expected, not exceptional.
 from __future__ import annotations
 
 import re
-import shutil
+
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -235,7 +235,19 @@ def find_lightcurve_files_recursive(day_dir: Path) -> tuple[list[DumpFile], list
 
 
 def recover_day_from_extracted(old_extracted_day_dir: Path, day_str: str,
-                                output_root: Path, bad_files_log: list[str]) -> Path | None:
+                                output_root: Path, bad_files_log: list[str]) -> tuple[Path | None, list[Path]]:
+    """
+    Returns (output_parquet_path, successfully_recovered_paths).
+
+    successfully_recovered_paths lists ONLY the specific files that were
+    actually used to build the output -- NOT every file found under
+    old_extracted_day_dir. This distinction matters: it's what lets the
+    caller safely delete ONLY files that were genuinely absorbed into
+    the merged output, never anything that ended up in bad_files_log
+    (unmatched-by-name or failed-to-parse). A file logged as "couldn't
+    recover" but then deleted anyway would be a real, silent data-loss
+    bug -- confirmed by direct testing before this fix.
+    """
     dumps, unmatched = find_lightcurve_files_recursive(old_extracted_day_dir)
 
     for u in unmatched:
@@ -243,20 +255,40 @@ def recover_day_from_extracted(old_extracted_day_dir: Path, day_str: str,
                               f"didn't match the expected dump-filename pattern)")
 
     if not dumps:
-        return None
+        return None, []
 
     winners, _ = resolve_day(dumps)
 
     frames = []
+    successfully_recovered_paths: list[Path] = []
     for dump in winners:
         try:
             df = load_helios(dump.path, hdu_index=5)
             frames.append(df)
+            successfully_recovered_paths.append(dump.path)
         except DataIngestionError as e:
             bad_files_log.append(f"{dump.path}  (FITS parsing failed during recovery: {e})")
             continue
 
-    return _save_merged(frames, day_str, output_root)
+    out_path = _save_merged(frames, day_str, output_root)
+    if out_path is None:
+        return None, []
+    return out_path, successfully_recovered_paths
+
+
+def _remove_empty_dirs_upward(start_dir: Path, stop_at: Path) -> None:
+    """After deleting specific files, cleans up any directories left
+    completely empty as a result -- but ONLY directories with zero
+    remaining files/subdirs. Never removes a directory that still
+    contains anything (e.g. an unmatched file's folder), and never
+    goes above stop_at (the day's own root folder)."""
+    current = start_dir
+    while current != stop_at and stop_at in current.parents:
+        if current.exists() and not any(current.iterdir()):
+            current.rmdir()
+            current = current.parent
+        else:
+            break
 
 
 def recover_all_from_extracted(old_extracted_root: Path, output_root: Path,
@@ -268,17 +300,21 @@ def recover_all_from_extracted(old_extracted_root: Path, output_root: Path,
 
     for day_dir in day_dirs:
         day_str = day_dir.name
-        out_path = recover_day_from_extracted(day_dir, day_str, output_root, bad_files_log)
+        out_path, recovered_paths = recover_day_from_extracted(day_dir, day_str, output_root, bad_files_log)
         if out_path is not None:
             n_recovered += 1
             print(f"{day_str}: recovered -> {out_path.name}")
             if delete_after:
-                for entry in day_dir.iterdir():
-                    if entry.is_dir():
-                        shutil.rmtree(entry)
-                    else:
-                        entry.unlink()
-                day_dir.rmdir()
+                # Only delete the SPECIFIC files that were actually
+                # absorbed into the merged output -- never the whole
+                # day_dir tree. A file that ended up in bad_files_log
+                # (unmatched-by-name, or failed to parse) is NEVER
+                # deleted here, even though its day "succeeded" overall --
+                # confirmed by direct testing that the old whole-tree
+                # delete silently destroyed real, un-recovered data.
+                for recovered_path in recovered_paths:
+                    recovered_path.unlink()
+                    _remove_empty_dirs_upward(recovered_path.parent, day_dir)
         else:
             n_failed += 1
             print(f"{day_str}: recovery FAILED -- no usable extracted files")

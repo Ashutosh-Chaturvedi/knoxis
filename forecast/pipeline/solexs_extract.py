@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 SoLEXS Pass 1 (v2): EXTRACTION ONLY (non-destructive) -- SDD2, LC + GTI only
 
@@ -27,17 +26,12 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
-# =====================================================
-# CONFIGURATION
-# =====================================================
 
 SOURCE_ROOT = Path(r"D:\Knoxis\data\training\pradan1.issdc.gov.in")
 OUTPUT_ROOT = Path(r"D:\Knoxis\data\training\solexs_sdd2")
 MANIFEST_PATH = Path(r"D:\Knoxis\data\training\solexs_extract_manifest.csv")
 
-DETECTOR = "SDD2"  # only this detector's files are extracted
-
-# =====================================================
+DETECTOR = "SDD2"  
 
 FILENAME_PATTERN = re.compile(r"AL1_SLX_L1_(\d{8})_v(\d+)\.(\d+)\.zip")
 
@@ -65,7 +59,7 @@ def select_zips_per_date(zips):
             continue
         by_date[date_str].append((zp, version))
 
-    selected = {}   # date_str -> zip_path
+    selected = {}   
     superseded = []
 
     for date_str, entries in by_date.items():
