@@ -2,239 +2,536 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Knoxis — Solar Flare Monitor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knoxis: solar flare monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
 <style>
   :root {
-    --bg: #FFFFFF;
-    --text-primary: #1B1D21;
-    --text-secondary: #6B7078;
-    --line: #D3D6DB;
-    --green: #2E8B57;
-    --yellow: #B8860B;
-    --orange: #C1622E;
-    --red: #C0392B;
+    color-scheme: light;
+    --paper: #F4F6F9;
+    --surface: #FFFFFF;
+    --ink: #16202C;
+    --ink-2: #55606E;
+    --ink-3: #8A919B;
+    --rule: #D5DBE3;
+    --brand: #2E5EAA;
+    --quiet: #2E8B57;
+    --watch: #B8860B;
+    --warning: #C1622E;
+    --alert: #C0392B;
+    --stale: #8A919B;
   }
+  * { box-sizing: border-box; }
   body {
-    background: var(--bg);
-    color: var(--text-primary);
-    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-    margin: 0;
-    padding: 48px 56px;
-    max-width: 880px;
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-variant-numeric: tabular-nums; line-height: 1.5;
   }
-  header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #2E5EAA;
-    margin: -48px -56px 36px -56px;
-    padding: 28px 56px;
-  }
-  h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.3px; color: #FFFFFF; }
-  .subtitle { margin: 4px 0 0 0; font-size: 13px; color: #C9D8F2; }
-  #clock { color: #C9D8F2; font-size: 13px; }
+  a, button, select, input { font: inherit; }
+  :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-  .row {
-    display: flex;
-    padding-bottom: 28px;
-    margin-bottom: 28px;
-    border-bottom: 1px solid var(--line);
-  }
-  .block { flex: 1; }
-  .block + .block {
-    padding-left: 64px;
-    border-left: 1px solid var(--line);
-  }
-  .label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-secondary);
-    margin-bottom: 10px;
-  }
-  .alert-level {
-    font-size: 34px;
-    font-weight: 600;
-    margin-bottom: 8px;
-    letter-spacing: 0.5px;
-  }
-  .detail-line {
-    color: #454A52;
-    font-size: 14px;
-    line-height: 1.6;
-  }
-  .as-of {
-    color: #9498A0;
-    font-size: 12px;
-    margin-top: 12px;
-  }
+  header { background: var(--brand); color: #fff; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+  .bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 0; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  .sub { margin: 2px 0 0; font-size: 13px; color: #C9D8F2; }
+  .mode { text-align: right; font-size: 13px; color: #C9D8F2; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; color: var(--ink); background: #fff; }
+  .badge.live { background: #CDEBD9; }
+  .badge.replay { background: #FBE7B5; }
 
-  .QUIET { color: var(--green); }
-  .WATCH { color: var(--yellow); }
-  .WARNING { color: var(--orange); }
-  .ALERT { color: var(--red); }
+  .banner { display: none; margin: 16px 0 0; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
+  .banner.error { background: #FBEAE9; color: #8E2A20; }
+  .banner.info { background: #E7EEF9; color: #23477F; }
+  .banner.warn { background: #FBF1D8; color: #6B4E06; }
 
-  #error-banner {
-    display: none;
-    background: #FBEAE9;
-    color: #A83226;
-    padding: 12px 18px;
-    border-radius: 6px;
-    margin-bottom: 24px;
-    font-size: 13px;
-  }
+  main { padding: 20px 0 48px; }
+  section { margin-top: 24px; }
+  h2 { margin: 0 0 10px; font-size: 16px; font-weight: 600; }
+  .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; padding: 18px 20px; }
 
-  .label-row {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-secondary);
-    margin-bottom: 16px;
-  }
+  /* timeline */
+  .controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 10px; }
+  .controls label { color: var(--ink-2); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  button { border: 1px solid var(--rule); background: var(--surface); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  button:hover { border-color: var(--brand); }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  select { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; background: var(--surface); }
+  #chart { width: 100%; min-height: 340px; }
+  #chart .u-legend { font-size: 12px; }
+  .scrub { margin-top: 8px; }
+  .scrub input { width: 100%; accent-color: var(--brand); }
+  .scrub .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); }
+  .legend-key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; }
+
+  /* status panels */
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .level { font-size: 34px; font-weight: 600; line-height: 1.15; margin: 2px 0 8px; }
+  .level.QUIET { color: var(--quiet); } .level.WATCH { color: var(--watch); }
+  .level.WARNING { color: var(--warning); } .level.ALERT { color: var(--alert); }
+  .level.stale { color: var(--stale); }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 14px; }
+  dt { color: var(--ink-2); } dd { margin: 0; text-align: right; }
+  .meter { height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; margin: 6px 0 2px; }
+  .meter > span { display: block; height: 100%; background: var(--watch); width: 0; }
+  .note { margin: 10px 0 0; font-size: 13px; color: var(--ink-2); }
+  .asof { margin: 10px 0 0; font-size: 12px; color: var(--ink-3); }
+
+  /* tables */
+  .scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th {
-    text-align: left;
-    color: var(--text-secondary);
-    font-weight: 500;
-    font-size: 12px;
-    padding: 0 0 10px 0;
-    border-bottom: 1px solid var(--line);
-  }
-  td {
-    padding: 12px 0;
-    border-bottom: 1px solid var(--line);
-    color: var(--text-primary);
-  }
+  th { text-align: left; font-weight: 500; font-size: 12px; color: var(--ink-2); padding: 0 12px 8px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  td { padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); white-space: nowrap; }
   tr:last-child td { border-bottom: none; }
+  td.num { text-align: right; }
+  td.empty { color: var(--ink-2); white-space: normal; }
+
+  @media (max-width: 760px) {
+    .two { grid-template-columns: 1fr; }
+    .mode { text-align: left; }
+    .wrap { padding: 0 16px; }
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <div>
-    <h1>Knoxis</h1>
-    <p class="subtitle">Dual-mode solar flare nowcasting and forecasting system — Aditya-L1 SoLEXS + HEL1OS</p>
+  <div class="wrap bar">
+    <div>
+      <h1>Knoxis</h1>
+      <p class="sub">Solar flare nowcasting and forecasting from Aditya-L1 SoLEXS and HEL1OS</p>
+    </div>
+    <div class="mode" aria-live="polite">
+      <span id="mode-badge" class="badge">Connecting</span>
+      <div id="data-time">Waiting for the API</div>
+    </div>
   </div>
-  <span id="clock">2026-06-21 19:32 UTC</span>
 </header>
 
-<div id="error-banner"></div>
+<main class="wrap">
+  <div id="banner-error" class="banner error" role="alert"></div>
+  <div id="banner-info" class="banner info"></div>
+  <div id="banner-warn" class="banner warn"></div>
 
-<div class="row">
-  <div class="block">
-    <div class="label">Nowcast — happening right now</div>
-    <div class="alert-level" id="nowcast-level">—</div>
-    <div class="detail-line" id="nowcast-detail">Loading…</div>
-    <div class="as-of" id="nowcast-asof"></div>
-  </div>
+  <section aria-labelledby="h-timeline">
+    <h2 id="h-timeline">SoLEXS flux timeline</h2>
+    <div class="panel">
+      <div class="controls">
+        <button id="btn-play" class="primary" type="button">Replay</button>
+        <label>Speed
+          <select id="sel-speed">
+            <option value="60">1 min per second</option>
+            <option value="300" selected>5 min per second</option>
+            <option value="900">15 min per second</option>
+          </select>
+        </label>
+        <label>Window
+          <select id="sel-window">
+            <option value="2">2 hours</option>
+            <option value="6" selected>6 hours</option>
+            <option value="12">12 hours</option>
+            <option value="0">All data</option>
+          </select>
+        </label>
+        <label><input id="chk-hel" type="checkbox" checked> HEL1OS</label>
+        <button id="btn-latest" type="button">Jump to latest</button>
+      </div>
+      <div id="chart" role="img" aria-label="SoLEXS flux with baseline, threshold and alert level shading"></div>
+      <div class="scrub">
+        <input id="scrub" type="range" min="0" max="1" step="60" value="1" aria-label="Replay position" disabled>
+        <div class="ends"><span id="scrub-start"></span><span id="scrub-pos"></span><span id="scrub-end"></span></div>
+      </div>
+      <div class="legend-key">
+        <span><span class="swatch" style="background:rgba(184,134,11,.35)"></span>Watch</span>
+        <span><span class="swatch" style="background:rgba(193,98,46,.4)"></span>Warning</span>
+        <span><span class="swatch" style="background:rgba(192,57,43,.45)"></span>Alert</span>
+        <span>Dashed vertical line: estimated onset. Solid vertical line: alert fired, after the sustain window.</span>
+      </div>
+      <p class="note">Replay re-runs the system on data up to the chosen time only. Nothing after that point reaches the nowcast or forecast.
+        Horizontal guides mark C1, M1 and X1 using the two-flare calibration, so treat them as indicative.</p>
+    </div>
+  </section>
 
-  <div class="block">
-    <div class="label">Forecast — next 60 minutes</div>
-    <div class="alert-level" id="forecast-level">—</div>
-    <div class="detail-line" id="forecast-detail">Loading…</div>
-    <div class="as-of" id="forecast-asof"></div>
-  </div>
-</div>
+  <section class="two" aria-label="Current status">
+    <div class="panel">
+      <h2>Nowcast: flare in progress</h2>
+      <div id="nc-level" class="level stale" aria-live="polite">No data</div>
+      <dl>
+        <dt>SoLEXS flux</dt><dd id="nc-flux">-</dd>
+        <dt>Baseline (trailing median)</dt><dd id="nc-base">-</dd>
+        <dt>Flux over baseline</dt><dd id="nc-ratio">-</dd>
+        <dt>GOES-equivalent</dt><dd id="nc-goes">-</dd>
+      </dl>
+      <div id="nc-pending" hidden>
+        <div class="note" id="nc-pending-text"></div>
+        <div class="meter"><span id="nc-pending-bar"></span></div>
+      </div>
+      <p class="note" id="nc-note"></p>
+      <p class="asof" id="nc-asof"></p>
+    </div>
 
-<div class="label-row">Recent nowcast detections</div>
-<table>
-  <tr><th>Detected</th><th>Peak</th><th>Peak flux</th><th>Class</th><th>HEL1OS corroboration</th></tr>
-  <tbody id="history-rows">
-    <tr><td colspan="5">Loading…</td></tr>
-  </tbody>
-</table>
+    <div class="panel">
+      <h2>Forecast: next 60 minutes</h2>
+      <div id="fc-level" class="level stale" aria-live="polite">No data</div>
+      <dl>
+        <dt>Flare probability</dt><dd id="fc-prob">-</dd>
+        <dt>Base rate</dt><dd id="fc-base">-</dd>
+        <dt>Relative to base rate</dt><dd id="fc-rel">-</dd>
+        <dt>Level cutoffs (watch, warning, alert)</dt><dd id="fc-thr">-</dd>
+        <dt>Model</dt><dd id="fc-model">-</dd>
+      </dl>
+      <p class="note" id="fc-note"></p>
+      <p class="note">Held-out skill is about 1.3 times the base rate, so read the probability as a ranking of risk, not a calibrated frequency.</p>
+      <p class="asof" id="fc-asof"></p>
+    </div>
+  </section>
 
+  <section aria-labelledby="h-events">
+    <h2 id="h-events">Detected flares</h2>
+    <div class="panel scroll">
+      <table>
+        <thead><tr>
+          <th>Est. onset (UTC)</th><th>Alert fired (UTC)</th><th>Peak (UTC)</th>
+          <th class="num">Peak flux</th><th>Class</th><th>HEL1OS corroboration</th>
+        </tr></thead>
+        <tbody id="events"><tr><td class="empty" colspan="6">Loading</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="two" aria-label="Data and evaluation">
+    <div class="panel">
+      <h2>Data health</h2>
+      <dl>
+        <dt>Samples in view</dt><dd id="dh-rows">-</dd>
+        <dt>SoLEXS good-time coverage</dt><dd id="dh-sx">-</dd>
+        <dt>HEL1OS zero-count fraction</dt><dd id="dh-hel">-</dd>
+        <dt>Data file updated</dt><dd id="dh-file">-</dd>
+      </dl>
+    </div>
+    <div class="panel">
+      <h2>Evaluation</h2>
+      <div class="scroll"><table><tbody id="metrics"><tr><td class="empty">Loading</td></tr></tbody></table></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
 <script>
-  const API_BASE = "http://127.0.0.1:8000";
-  const REFRESH_INTERVAL_MS = 10000;
+"use strict";
+const API = new URLSearchParams(location.search).get("api") || "http://127.0.0.1:8000";
+const POLL_MS = 10000;
+const STALE_WARN_S = 120;
+const FEED_STALL_S = 20;
+const LEVEL_TEXT = { QUIET: "Quiet", WATCH: "Watch", WARNING: "Warning", ALERT: "Alert" };
+const BAND = [null, "rgba(184,134,11,0.13)", "rgba(193,98,46,0.17)", "rgba(192,57,43,0.22)"];
 
-  function updateClock() {
-    document.getElementById("clock").textContent =
-      new Date().toUTCString().replace("GMT", "UTC");
-  }
-  setInterval(updateClock, 1000);
-  updateClock();
+const $ = id => document.getElementById(id);
+const S = { cursor: null, span: null, playing: false, windowH: 6, ctl: null, chart: null, ts: null, debounce: null };
 
-  function setLevel(elId, level) {
-    const el = document.getElementById(elId);
-    el.textContent = level || "UNKNOWN";
-    el.className = "alert-level " + (level || "");
-  }
+/* ---------- helpers ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmtUTC = v => {
+  if (v == null) return "-";
+  const d = typeof v === "number" ? new Date(v * 1000) : new Date(v);
+  return isNaN(d) ? "-" : d.toISOString().replace("T", " ").slice(0, 19) + " UTC";
+};
+const fmtNum = (v, d = 1) => v == null ? "-" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d });
+const fmtPct = (v, d = 1) => v == null ? "-" : (v * 100).toFixed(d) + "%";
+const fmtDur = s => s == null ? "-" : (s >= 60 ? Math.floor(s / 60) + " min " : "") + Math.round(s % 60) + " s";
+const setText = (id, t) => { $(id).textContent = t; };
+const show = (id, msg) => { const e = $(id); e.textContent = msg || ""; e.style.display = msg ? "block" : "none"; };
 
-  async function fetchStatus() {
-    const errorBanner = document.getElementById("error-banner");
-    try {
-      const res = await fetch(`${API_BASE}/status`);
-      if (!res.ok) throw new Error(`API returned ${res.status}`);
-      const data = await res.json();
-      errorBanner.style.display = "none";
-
-      const nc = data.nowcast;
-      setLevel("nowcast-level", nc.alert_level);
-      if (nc.note) {
-        document.getElementById("nowcast-detail").textContent = nc.note;
-      } else {
-        const fluxStr = nc.current_flux != null ? nc.current_flux.toFixed(1) : "—";
-        const baseStr = nc.baseline != null ? nc.baseline.toFixed(1) : "—";
-        const classStr = nc.goes_class ? ` — confirmed ${nc.goes_class}` : "";
-        document.getElementById("nowcast-detail").textContent =
-          `Flux ${fluxStr} counts/s (baseline ${baseStr})${classStr}`;
-      }
-      document.getElementById("nowcast-asof").textContent =
-        nc.as_of ? `As of ${nc.as_of}` : "";
-
-      const fc = data.forecast;
-      setLevel("forecast-level", fc.alert_level);
-      if (fc.note) {
-        document.getElementById("forecast-detail").textContent = fc.note;
-      } else {
-        const pct = fc.flare_probability != null
-          ? (fc.flare_probability * 100).toFixed(1) + "%"
-          : "—";
-        document.getElementById("forecast-detail").textContent =
-          `Flare probability ${pct}`;
-      }
-      document.getElementById("forecast-asof").textContent =
-        fc.as_of ? `As of ${fc.as_of}` : "";
-
-    } catch (err) {
-      errorBanner.style.display = "block";
-      errorBanner.textContent =
-        `Could not reach the Knoxis API at ${API_BASE} — is the backend running? (${err.message})`;
+async function api(path, parent) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  if (parent) parent.addEventListener("abort", () => ctl.abort(), { once: true });
+  try {
+    const r = await fetch(API + path, { signal: ctl.signal });
+    if (!r.ok) {
+      let d = ""; try { d = (await r.json()).detail; } catch (_) {}
+      throw new Error(d || "HTTP " + r.status);
     }
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+
+/* ---------- status rendering ---------- */
+function setLevel(id, level) {
+  const e = $(id);
+  e.textContent = level ? (LEVEL_TEXT[level] || level) : "No data";
+  e.className = "level " + (level || "stale");
+}
+
+function markNoData(msg) {
+  setLevel("nc-level", null); setLevel("fc-level", null);
+  for (const id of ["nc-flux", "nc-base", "nc-ratio", "nc-goes", "fc-prob", "fc-base", "fc-rel", "fc-thr", "fc-model"]) setText(id, "-");
+  $("nc-pending").hidden = true;
+  setText("nc-note", ""); setText("fc-note", ""); setText("nc-asof", ""); setText("fc-asof", "");
+  const b = $("mode-badge"); b.textContent = "No connection"; b.className = "badge";
+  setText("data-time", "No data received");
+  show("banner-error", msg);
+}
+
+function renderNowcast(nc) {
+  setLevel("nc-level", nc.alert_level);
+  setText("nc-flux", nc.current_flux == null ? "unavailable" : fmtNum(nc.current_flux) + " counts/s");
+  setText("nc-base", nc.baseline == null ? "-" : fmtNum(nc.baseline) + " counts/s");
+  setText("nc-ratio", nc.ratio == null ? "-" : nc.ratio.toFixed(2) + "x (alert at " + nc.threshold_ratio + "x)");
+  const cls = nc.goes_class ? "confirmed " + nc.goes_class : (nc.goes_equiv_class ? "about " + nc.goes_equiv_class : "-");
+  setText("nc-goes", cls);
+
+  const pend = $("nc-pending");
+  if (nc.pending_s != null && nc.sustain_s > 0) {
+    pend.hidden = false;
+    const frac = Math.min(1, nc.pending_s / nc.sustain_s);
+    setText("nc-pending-text", nc.pending_s >= nc.sustain_s
+      ? "Above threshold for " + fmtDur(nc.pending_s) + ". Sustain window met."
+      : "Above threshold for " + fmtDur(nc.pending_s) + " of " + fmtDur(nc.sustain_s) + " needed to confirm.");
+    $("nc-pending-bar").style.width = (frac * 100) + "%";
+  } else { pend.hidden = true; }
+  setText("nc-note", nc.note || "");
+  setText("nc-asof", nc.as_of ? "Sample time " + fmtUTC(nc.as_of) : "");
+}
+
+function renderForecast(fc) {
+  setLevel("fc-level", fc.alert_level);
+  const p = fc.flare_probability, b = fc.base_rate;
+  setText("fc-prob", fmtPct(p));
+  setText("fc-base", fmtPct(b));
+  setText("fc-rel", p != null && b ? (p / b).toFixed(2) + "x" : "-");
+  const t = fc.thresholds || {};
+  setText("fc-thr", t.watch != null ? [t.watch, t.warning, t.alert].map(x => fmtPct(x, 0)).join(", ") : "-");
+  setText("fc-model", fc.model_version || "unknown version");
+  setText("fc-note", fc.note || "");
+  setText("fc-asof", fc.as_of ? "Window ending " + fmtUTC(fc.as_of) : "");
+}
+
+function renderStatus(s) {
+  const replay = s.mode === "replay", sim = s.mode === "simulated";
+  const b = $("mode-badge");
+  b.textContent = S.cursor != null ? "Replay" : (sim ? "Simulated live" : replay ? "Archived data" : "Live");
+  b.className = "badge " + (replay ? "replay" : "live");
+  setText("data-time", s.data_time ? "Data through " + fmtUTC(s.data_time) : "No samples");
+
+  show("banner-error", "");
+  show("banner-info", S.cursor != null ? "" :
+    replay && s.data_time
+      ? "This is archived data. The latest sample is from " + fmtUTC(s.data_time) + ", so the levels below describe that moment, not the Sun now."
+      : sim && s.data_time
+        ? "Simulated feed: archived data is being replayed as if it were arriving now. The current simulated time is " + fmtUTC(s.data_time) + "."
+        : "");
+  show("banner-warn",
+    sim && s.file_age_s != null && s.file_age_s > FEED_STALL_S
+      ? "The simulated feed has not written new data for " + fmtDur(s.file_age_s) + ". Is live_feed_simulator.py still running?"
+      : (!replay && !sim && s.data_age_s != null && s.data_age_s > STALE_WARN_S)
+        ? "The newest sample is " + fmtDur(s.data_age_s) + " old. Check the ingestion job." : "");
+
+  renderNowcast(s.nowcast);
+  renderForecast(s.forecast);
+
+  const h = s.data_health || {};
+  setText("dh-rows", fmtNum(h.rows, 0));
+  setText("dh-sx", fmtPct(h.solexs_valid_fraction));
+  setText("dh-hel", fmtPct(h.hel1os_zero_fraction));
+  setText("dh-file", fmtUTC(h.file_updated));
+
+  if (s.span_start && s.span_end) {
+    S.span = { start: Date.parse(s.span_start) / 1000, end: Date.parse(s.span_end) / 1000 };
+    const sc = $("scrub");
+    sc.disabled = false; sc.min = S.span.start; sc.max = S.span.end;
+    sc.value = S.cursor == null ? S.span.end : S.cursor;
+    setText("scrub-start", fmtUTC(S.span.start));
+    setText("scrub-end", fmtUTC(S.span.end));
+    setText("scrub-pos", S.cursor == null ? "Latest sample" : fmtUTC(S.cursor));
   }
+}
 
-  async function fetchFlareHistory() {
-    const tbody = document.getElementById("history-rows");
-    try {
-      const res = await fetch(`${API_BASE}/flare-history`);
-      if (!res.ok) throw new Error(`API returned ${res.status}`);
-      const data = await res.json();
+/* ---------- events table ---------- */
+function td(text, cls) { const c = document.createElement("td"); c.textContent = text; if (cls) c.className = cls; return c; }
+function renderEvents(h) {
+  const body = $("events");
+  body.replaceChildren();
+  if (!h.events || h.events.length === 0) {
+    const tr = document.createElement("tr"), c = td(h.note || "No confirmed flares in this view.", "empty");
+    c.colSpan = 6; tr.appendChild(c); body.appendChild(tr); return;
+  }
+  for (const ev of h.events) {
+    const tr = document.createElement("tr");
+    const cor = ev.hel1os_corroboration;
+    tr.append(
+      td(fmtUTC(ev.onset_time)), td(fmtUTC(ev.detection_time)), td(fmtUTC(ev.peak_time)),
+      td(ev.peak_flux == null ? "-" : fmtNum(ev.peak_flux) + " counts/s", "num"),
+      td(ev.goes_class || "-"),
+      td(cor ? cor.charAt(0).toUpperCase() + cor.slice(1) : "-"));
+    body.appendChild(tr);
+  }
+}
 
-      if (data.events.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5">${data.note || "No recent events."}</td></tr>`;
-        return;
+/* ---------- chart ---------- */
+function bandsPlugin() {
+  return { hooks: {
+    drawClear: [u => {
+      const ts = S.ts; if (!ts || !ts.t.length) return;
+      const { ctx } = u, { top, height } = u.bbox;
+      let i = 0;
+      while (i < ts.t.length) {
+        const lv = ts.level[i];
+        let j = i; while (j + 1 < ts.t.length && ts.level[j + 1] === lv) j++;
+        if (lv > 0 && BAND[lv]) {
+          const x0 = u.valToPos(ts.t[i], "x", true), x1 = u.valToPos(ts.t[Math.min(j + 1, ts.t.length - 1)], "x", true);
+          ctx.fillStyle = BAND[lv]; ctx.fillRect(x0, top, Math.max(x1 - x0, 1), height);
+        }
+        i = j + 1;
       }
+    }],
+    draw: [u => {
+      const ts = S.ts; if (!ts) return;
+      const { ctx } = u, { left, top, width, height } = u.bbox, dpr = devicePixelRatio || 1;
+      ctx.save(); ctx.lineWidth = 1 * dpr;
+      for (const ev of ts.events) {
+        for (const [x, dash, col] of [[ev.onset, [4 * dpr, 3 * dpr], "#C1622E"], [ev.detection, [], "#C0392B"]]) {
+          const px = u.valToPos(x, "x", true);
+          if (px < left || px > left + width) continue;
+          ctx.strokeStyle = col; ctx.setLineDash(dash);
+          ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, top + height); ctx.stroke();
+        }
+        if (ev.goes_class) {
+          const px = u.valToPos(ev.detection, "x", true);
+          ctx.setLineDash([]); ctx.fillStyle = "#C0392B"; ctx.font = (11 * dpr) + "px IBM Plex Sans, sans-serif";
+          ctx.fillText(ev.goes_class, px + 4 * dpr, top + 12 * dpr);
+        }
+      }
+      // GOES class guides
+      const y = u.scales.y;
+      ctx.font = (11 * dpr) + "px IBM Plex Sans, sans-serif"; ctx.fillStyle = "#8A919B"; ctx.strokeStyle = "#B8BEC7";
+      ctx.setLineDash([2 * dpr, 4 * dpr]);
+      for (const [label, w] of [["C1", 1e-6], ["M1", 1e-5], ["X1", 1e-4]]) {
+        const counts = w / ts.goes_factor;
+        if (!(counts > y.min && counts < y.max)) continue;
+        const py = u.valToPos(counts, "y", true);
+        ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(left + width, py); ctx.stroke();
+        ctx.fillText(label, left + 4 * dpr, py - 3 * dpr);
+      }
+      ctx.restore();
+    }],
+  } };
+}
 
-      tbody.innerHTML = data.events.map(ev => `
-        <tr>
-          <td>${new Date(ev.detection_time).toUTCString().replace("GMT", "UTC")}</td>
-          <td>${new Date(ev.peak_time).toUTCString().replace("GMT", "UTC")}</td>
-          <td>${ev.peak_flux.toFixed(1)} counts/s</td>
-          <td>${ev.goes_class}</td>
-          <td>${ev.hel1os_corroboration.charAt(0).toUpperCase() + ev.hel1os_corroboration.slice(1)}</td>
-        </tr>
-      `).join("");
-    } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5">Could not load flare history (${err.message})</td></tr>`;
-    }
+function buildChart(data) {
+  const el = $("chart");
+  if (S.chart) { S.chart.destroy(); S.chart = null; }
+  if (typeof uPlot === "undefined") { el.textContent = "Chart library failed to load."; return; }
+  const opts = {
+    width: el.clientWidth, height: 340,
+    tzDate: ts => uPlot.tzDate(new Date(ts * 1e3), "UTC"),
+    plugins: [bandsPlugin()],
+    cursor: { drag: { x: false, y: false } },
+    scales: { x: { time: true }, y: { distr: 3 }, h: { auto: true } },
+    axes: [
+      { stroke: "#55606E", grid: { stroke: "#E6EAF0", width: 1 } },
+      { stroke: "#55606E", grid: { stroke: "#E6EAF0", width: 1 }, label: "SoLEXS counts/s (log)", size: 70 },
+      { scale: "h", side: 1, stroke: "#5B8F8A", grid: { show: false }, label: "HEL1OS counts/s", size: 60 },
+    ],
+    series: [
+      {},
+      { label: "SoLEXS flux", stroke: "#16202C", width: 1.4, spanGaps: false },
+      { label: "Baseline", stroke: "#2E5EAA", width: 1.2 },
+      { label: "Alert threshold", stroke: "#C1622E", width: 1.2, dash: [5, 4] },
+      { label: "HEL1OS", scale: "h", stroke: "#5B8F8A", width: 1, show: $("chk-hel").checked },
+    ],
+  };
+  S.chart = new uPlot(opts, data, el);
+}
+
+function renderChart(ts) {
+  S.ts = ts;
+  const pos = a => a.map(v => (v == null || v <= 0) ? null : v);
+  const base = pos(ts.baseline);
+  const data = [ts.t, pos(ts.flux), base, base.map(b => b == null ? null : b * ts.threshold_ratio), ts.hel1os];
+  if (!S.chart) buildChart(data); else S.chart.setData(data);
+}
+
+/* ---------- refresh loop ---------- */
+async function refresh() {
+  if (S.ctl) S.ctl.abort();
+  const ctl = new AbortController(); S.ctl = ctl;
+  const asOf = S.cursor == null ? "" : new Date(S.cursor * 1000).toISOString();
+  const q = asOf ? "as_of=" + encodeURIComponent(asOf) : "";
+  try {
+    const status = await api("/status?" + q, ctl.signal);
+    renderStatus(status);
+
+    const endT = S.cursor != null ? S.cursor : (S.span ? S.span.end : null);
+    let tsq = "max_points=1500" + (q ? "&" + q : "");
+    if (S.windowH > 0 && endT != null) tsq += "&start=" + encodeURIComponent(new Date((endT - S.windowH * 3600) * 1000).toISOString());
+    const [ts, hist] = await Promise.all([api("/timeseries?" + tsq, ctl.signal), api("/flare-history?" + q, ctl.signal)]);
+    renderChart(ts);
+    renderEvents(hist);
+  } catch (err) {
+    if (ctl.signal.aborted && S.ctl !== ctl) return;           // superseded by a newer request
+    markNoData("Could not reach the Knoxis API at " + API + ". Is the backend running? (" + (err.message || "request timed out") + ")");
   }
+}
 
-  fetchStatus();
-  fetchFlareHistory();
-  setInterval(fetchStatus, REFRESH_INTERVAL_MS);
-  setInterval(fetchFlareHistory, REFRESH_INTERVAL_MS);
+function scheduleRefresh() { clearTimeout(S.debounce); S.debounce = setTimeout(refresh, 150); }
+
+/* ---------- evaluation ---------- */
+const flatten = (o, p = "") => Object.entries(o).flatMap(([k, v]) =>
+  v && typeof v === "object" && !Array.isArray(v) ? flatten(v, p + k + ".") : [[p + k, Array.isArray(v) ? v.join(", ") : v]]);
+
+async function loadMetrics() {
+  const body = $("metrics"); body.replaceChildren();
+  const row = (a, b) => { const tr = document.createElement("tr"); tr.append(td(a), td(b, "num")); body.appendChild(tr); };
+  try {
+    const m = await api("/metrics");
+    if (!m.available) {
+      const tr = document.createElement("tr"), c = td("No evaluation results yet. Run the offline evaluation job to write metrics.json.", "empty");
+      tr.appendChild(c); body.appendChild(tr); return;
+    }
+    for (const [k, v] of flatten(m.metrics)) row(k.replace(/_/g, " "), typeof v === "number" ? Number(v.toPrecision(4)).toString() : String(v));
+  } catch (err) {
+    const tr = document.createElement("tr"); tr.appendChild(td("Could not load evaluation (" + err.message + ")", "empty")); body.appendChild(tr);
+  }
+}
+
+/* ---------- replay controls ---------- */
+function stopPlay() { S.playing = false; setText("btn-play", "Replay"); $("btn-play").classList.add("primary"); }
+
+async function playLoop() {
+  S.playing = true; setText("btn-play", "Pause");
+  if (S.cursor == null && S.span) S.cursor = S.span.start + 600;
+  while (S.playing && S.span) {
+    await refresh();
+    if (!S.playing) break;
+    await sleep(700);
+    S.cursor += Number($("sel-speed").value);
+    if (S.cursor >= S.span.end) { S.cursor = null; stopPlay(); await refresh(); break; }
+  }
+}
+
+$("btn-play").addEventListener("click", () => { S.playing ? stopPlay() : playLoop(); });
+$("btn-latest").addEventListener("click", () => { stopPlay(); S.cursor = null; refresh(); });
+$("sel-window").addEventListener("change", e => { S.windowH = Number(e.target.value); refresh(); });
+$("chk-hel").addEventListener("change", e => { if (S.chart) S.chart.setSeries(4, { show: e.target.checked }); });
+$("scrub").addEventListener("input", e => {
+  stopPlay();
+  const v = Number(e.target.value);
+  S.cursor = (S.span && v >= S.span.end) ? null : v;
+  setText("scrub-pos", S.cursor == null ? "Latest sample" : fmtUTC(S.cursor));
+  scheduleRefresh();
+});
+window.addEventListener("resize", () => { if (S.chart) S.chart.setSize({ width: $("chart").clientWidth, height: 340 }); });
+
+/* ---------- start ---------- */
+refresh();
+loadMetrics();
+setInterval(() => { if (!S.playing && S.cursor == null) refresh(); }, POLL_MS);
+setInterval(loadMetrics, 60000);
 </script>
-
 </body>
 </html>
