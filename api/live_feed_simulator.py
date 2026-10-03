@@ -10,6 +10,12 @@ in the file, then periodically appends the next chunk of real historical
 data, advancing the "current" timestamp forward -- exactly like a real
 feed would grow over time, just compressed into minutes instead of
 playing out over real hours.
+
+Changes from the previous version
+- replace_with_retry(): on Windows, os.replace raises PermissionError while the API has the
+  target open for reading. Retry briefly instead of crashing the simulator.
+- The final tick always writes the complete source data, even when the step size does not
+  divide the remaining range evenly.
 """
 
 from __future__ import annotations
@@ -18,6 +24,25 @@ import time
 from pathlib import Path
 
 import pandas as pd
+
+
+def replace_with_retry(tmp_path: Path, target: Path, attempts: int = 20, delay: float = 0.1) -> None:
+    for i in range(attempts):
+        try:
+            tmp_path.replace(target)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
+def write_window(window: pd.DataFrame, output_file: Path) -> None:
+    # Atomic write: save to a temp file first, then rename onto the real target, so the
+    # API only ever sees the complete old file or the complete new file.
+    tmp_path = output_file.with_suffix(output_file.suffix + ".tmp")
+    window.to_parquet(tmp_path)
+    replace_with_retry(tmp_path, output_file)
 
 
 def run_simulation(
@@ -34,12 +59,10 @@ def run_simulation(
 
     Parameters
     ----------
-    source_file : the full historical data to replay from (e.g. a
-        real combine_day.py output, or a multi-day concatenation)
+    source_file : the full historical data to replay from
     output_file : the file the API's KNOXIS_DATA_FILE should point to
-    initial_leadin_hours : how much history to seed the file with before
-        the simulation starts advancing (needs to be >=24h for the
-        nowcast engine's baseline to be meaningful from the first step)
+    initial_leadin_hours : history seeded into the file before the simulation advances
+        (>=24h so the nowcast baseline is meaningful from the first step)
     step_minutes : how far the "current" timestamp advances per tick
     interval_seconds : real wall-clock seconds between ticks
     """
@@ -66,23 +89,16 @@ def run_simulation(
     print("  Press Ctrl+C to stop.\n")
 
     current_time = leadin_end
-    while current_time <= end_time:
-        window = full_data.loc[:current_time]
-        # Atomic write: save to a temp file first, then rename onto the
-        # real target. A rename is atomic at the OS level (both Windows
-        # and Linux), so a reader (the API) can only ever see the
-        # complete OLD file or the complete NEW file -- never a
-        # partially-written one. Writing directly to output_file was
-        # tested and found to cause real read failures ~45% of the time
-        # under concurrent access -- this fixes that.
-        tmp_path = output_file.with_suffix(output_file.suffix + ".tmp")
-        window.to_parquet(tmp_path)
-        tmp_path.replace(output_file)
+    step = pd.Timedelta(minutes=step_minutes)
+    while True:
+        done = current_time >= end_time
+        window = full_data if done else full_data.loc[:current_time]
+        write_window(window, output_file)
         print(f"  [{pd.Timestamp.now().strftime('%H:%M:%S')}] "
-              f"latest_data.parquet now covers up to {current_time} "
-              f"({len(window)} rows)")
-
-        current_time += pd.Timedelta(minutes=step_minutes)
+              f"{output_file.name} now covers up to {window.index.max()} ({len(window)} rows)")
+        if done:
+            break
+        current_time += step
         time.sleep(interval_seconds)
 
     print("\nReached the end of the source data. Simulation complete.")
@@ -92,13 +108,13 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Simulate a live data feed for the Knoxis API")
     parser.add_argument("--source-file", required=True,
-                         help="Real historical data to replay (e.g. june21_with_leadin.parquet)")
+                        help="Real historical data to replay (e.g. june21_with_leadin.parquet)")
     parser.add_argument("--output-file", default="latest_data.parquet",
-                         help="Where to write the growing 'live' file (point KNOXIS_DATA_FILE here)")
+                        help="Where to write the growing 'live' file (point KNOXIS_DATA_FILE here)")
     parser.add_argument("--leadin-hours", type=float, default=24.0)
     parser.add_argument("--step-minutes", type=float, default=5.0)
     parser.add_argument("--interval-seconds", type=float, default=3.0,
-                         help="Real seconds between updates -- lower = faster demo")
+                        help="Real seconds between updates -- lower = faster demo")
     args = parser.parse_args()
 
     run_simulation(
