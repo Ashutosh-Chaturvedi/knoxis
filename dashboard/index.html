@@ -203,6 +203,15 @@
     </div>
   </section>
 
+  <section aria-labelledby="h-diag">
+    <h2 id="h-diag">Diagnostics</h2>
+    <div class="panel scroll">
+      <p class="note" style="margin-top:0">Checks that the API, data file, model and optional inputs are in place, and says what to fix.</p>
+      <button id="btn-diag" type="button">Run checks</button>
+      <table><tbody id="diag"></tbody></table>
+    </div>
+  </section>
+
   <section class="two" aria-label="Data and evaluation">
     <div class="panel">
       <h2>Data health</h2>
@@ -223,7 +232,7 @@
 <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
 <script>
 "use strict";
-const API = new URLSearchParams(location.search).get("api") || "http://127.0.0.1:8000";
+let API = null;                                    // resolved by resolveApi() at startup
 const POLL_MS = 10000;
 const STALE_WARN_S = 120;
 const FEED_STALL_S = 20;
@@ -246,9 +255,20 @@ const fmtDur = s => s == null ? "-" : (s >= 60 ? Math.floor(s / 60) + " min " : 
 const setText = (id, t) => { $(id).textContent = t; };
 const show = (id, msg) => { const e = $(id); e.textContent = msg || ""; e.style.display = msg ? "block" : "none"; };
 
+async function resolveApi() {
+  const q = new URLSearchParams(location.search).get("api");
+  const cands = [q, location.protocol.startsWith("http") ? location.origin : null,
+                 "http://127.0.0.1:8000", "http://localhost:8000"].filter(Boolean);
+  for (const base of [...new Set(cands)]) {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 2500);
+    try { const r = await fetch(base + "/health", { signal: ctl.signal }); if (r.ok) return base; } catch (_) {} finally { clearTimeout(timer); }
+  }
+  return null;
+}
+
 async function api(path, parent) {
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), 8000);
+  const timer = setTimeout(() => ctl.abort(), 30000);
   if (parent) parent.addEventListener("abort", () => ctl.abort(), { once: true });
   try {
     const r = await fetch(API + path, { signal: ctl.signal });
@@ -274,8 +294,11 @@ function markNoData(msg) {
   setText("nc-note", ""); setText("fc-note", ""); setText("nc-asof", ""); setText("fc-asof", "");
   const b = $("mode-badge"); b.textContent = "No connection"; b.className = "badge";
   setText("data-time", "No data received");
+  show("banner-info", ""); show("banner-warn", "");
   show("banner-error", msg);
 }
+
+const errText = err => err && err.name === "AbortError" ? "the request timed out after 30 s" : (err && err.message) || "unknown error";
 
 function renderNowcast(nc) {
   setLevel("nc-level", nc.alert_level);
@@ -458,6 +481,14 @@ function renderChart(ts) {
 
 /* ---------- refresh loop ---------- */
 async function refresh() {
+  if (!API) {
+    API = await resolveApi();
+    if (!API) {
+      markNoData("No Knoxis API found at the page origin, 127.0.0.1:8000 or localhost:8000. Start it with: uvicorn api.main:app --port 8000 (from the repo root). " +
+                 "If it runs elsewhere, open this page with ?api=http://host:port.");
+      return;
+    }
+  }
   if (S.ctl) S.ctl.abort();
   const ctl = new AbortController(); S.ctl = ctl;
   const asOf = S.cursor == null ? "" : new Date(S.cursor * 1000).toISOString();
@@ -469,12 +500,17 @@ async function refresh() {
     const endT = S.cursor != null ? S.cursor : (S.span ? S.span.end : null);
     let tsq = "max_points=1500" + (q ? "&" + q : "");
     if (S.windowH > 0 && endT != null) tsq += "&start=" + encodeURIComponent(new Date((endT - S.windowH * 3600) * 1000).toISOString());
-    const [ts, hist] = await Promise.all([api("/timeseries?" + tsq, ctl.signal), api("/flare-history?" + q, ctl.signal)]);
-    renderChart(ts);
-    renderEvents(hist);
+    const [tsR, histR] = await Promise.allSettled([api("/timeseries?" + tsq, ctl.signal), api("/flare-history?" + q, ctl.signal)]);
+    if (S.ctl !== ctl) return;                                   // superseded by a newer request
+    const failed = [];
+    if (tsR.status === "fulfilled") renderChart(tsR.value); else failed.push(["timeline", tsR.reason]);
+    if (histR.status === "fulfilled") renderEvents(histR.value); else failed.push(["event table", histR.reason]);
+    if (failed.length) {                                         // keep the status panels and the previous chart
+      show("banner-warn", "Could not load the " + failed.map(f => f[0]).join(" and ") + " (" + errText(failed[0][1]) + "). Showing the previous view.");
+    }
   } catch (err) {
-    if (ctl.signal.aborted && S.ctl !== ctl) return;           // superseded by a newer request
-    markNoData("Could not reach the Knoxis API at " + API + ". Is the backend running? (" + (err.message || "request timed out") + ")");
+    if (S.ctl !== ctl) return;                                   // superseded by a newer request
+    markNoData("Could not reach the Knoxis API at " + API + ". Is the backend running? (" + errText(err) + ")");
   }
 }
 
@@ -483,20 +519,41 @@ function scheduleRefresh() { clearTimeout(S.debounce); S.debounce = setTimeout(r
 /* ---------- evaluation ---------- */
 const flatten = (o, p = "") => Object.entries(o).flatMap(([k, v]) =>
   v && typeof v === "object" && !Array.isArray(v) ? flatten(v, p + k + ".") : [[p + k, Array.isArray(v) ? v.join(", ") : v]]);
+const SECTION = { nowcast: "Nowcast detections", vs_truth: "Against truth catalog", batch: "Offline evaluation job" };
 
-async function loadMetrics() {
+async function loadEvaluation() {
+  if (!API) return;
   const body = $("metrics"); body.replaceChildren();
-  const row = (a, b) => { const tr = document.createElement("tr"); tr.append(td(a), td(b, "num")); body.appendChild(tr); };
+  const full = (text, cls) => { const tr = document.createElement("tr"), c = td(text, cls); c.colSpan = 2; tr.appendChild(c); body.appendChild(tr); };
   try {
-    const m = await api("/metrics");
-    if (!m.available) {
-      const tr = document.createElement("tr"), c = td("No evaluation results yet. Run the offline evaluation job to write metrics.json.", "empty");
-      tr.appendChild(c); body.appendChild(tr); return;
+    const ev = await api("/evaluation");
+    for (const key of ["nowcast", "vs_truth", "batch"]) {
+      if (!ev[key]) continue;
+      const head = document.createElement("tr"), hc = td(SECTION[key]); hc.colSpan = 2; hc.style.fontWeight = "600"; head.appendChild(hc); body.appendChild(head);
+      for (const [k, v] of flatten(ev[key])) {
+        const tr = document.createElement("tr");
+        tr.append(td(k.replace(/_/g, " ")), td(typeof v === "number" ? Number(v.toPrecision(4)).toString() : String(v), "num"));
+        body.appendChild(tr);
+      }
     }
-    for (const [k, v] of flatten(m.metrics)) row(k.replace(/_/g, " "), typeof v === "number" ? Number(v.toPrecision(4)).toString() : String(v));
-  } catch (err) {
-    const tr = document.createElement("tr"); tr.appendChild(td("Could not load evaluation (" + err.message + ")", "empty")); body.appendChild(tr);
-  }
+    for (const n of ev.notes || []) full(n, "empty");
+    if (!body.children.length) full("No evaluation data yet.", "empty");
+  } catch (err) { full("Could not load evaluation (" + errText(err) + ")", "empty"); }
+}
+
+/* ---------- diagnostics ---------- */
+async function runDiagnostics() {
+  const box = $("diag"); box.replaceChildren();
+  const line = (label, text, cls) => { const tr = document.createElement("tr"); tr.append(td(label, cls), td(text)); box.appendChild(tr); };
+  if (!API) API = await resolveApi();
+  if (!API) { line("API", "Not reachable. Start it with: uvicorn api.main:app --port 8000 (from the repo root).", "empty"); return; }
+  try {
+    const d = await api("/diagnostics");
+    line("Overall", d.ok ? "All required checks pass." : "Some required checks fail. See below.");
+    for (const c of d.checks) line((c.ok ? "OK: " : (c.required ? "Problem: " : "Optional: ")) + c.name, c.detail + (c.hint ? "  ->  " + c.hint : ""));
+    const k = d.config;
+    line("Replay strategy", k.replay_strategy + " (setting: " + k.replay_setting + "). Self-check: " + k.causality_self_check);
+  } catch (err) { line("Diagnostics", "Failed: " + errText(err), "empty"); }
 }
 
 /* ---------- replay controls ---------- */
@@ -504,7 +561,8 @@ function stopPlay() { S.playing = false; setText("btn-play", "Replay"); $("btn-p
 
 async function playLoop() {
   S.playing = true; setText("btn-play", "Pause");
-  if (S.cursor == null && S.span) S.cursor = S.span.start + 600;
+  if (S.cursor == null && S.span)                       // start one window before the end, not at the first minute of data
+    S.cursor = Math.max(S.span.start + 600, S.span.end - (S.windowH || 24) * 3600);
   while (S.playing && S.span) {
     await refresh();
     if (!S.playing) break;
@@ -528,10 +586,10 @@ $("scrub").addEventListener("input", e => {
 window.addEventListener("resize", () => { if (S.chart) S.chart.setSize({ width: $("chart").clientWidth, height: 340 }); });
 
 /* ---------- start ---------- */
-refresh();
-loadMetrics();
+refresh().then(loadEvaluation);
 setInterval(() => { if (!S.playing && S.cursor == null) refresh(); }, POLL_MS);
-setInterval(loadMetrics, 60000);
+setInterval(loadEvaluation, 60000);
+$("btn-diag").addEventListener("click", runDiagnostics);
 </script>
 </body>
 </html>

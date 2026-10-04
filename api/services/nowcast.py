@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 
 from api.config import GOES_FACTOR, THRESHOLD_RATIO
 from api.schemas import NowcastResponse
@@ -57,7 +58,8 @@ def compute_nowcast(snap: Snapshot) -> NowcastResponse:
     goes_class = None
     catalog = res.get("flare_catalog")
     if level == "ALERT" and catalog is not None and len(catalog) > 0:
-        goes_class = str(catalog.sort_values("detection_time").iloc[-1]["goes_class"])
+        gc = catalog.sort_values("detection_time").iloc[-1]["goes_class"]
+        goes_class = None if pd.isna(gc) else str(gc)
 
     return NowcastResponse(
         as_of=py_dt(ts), alert_level=level, current_flux=flux, flux_valid=flux_valid,

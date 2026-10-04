@@ -30,6 +30,20 @@ MODE_OVERRIDE = os.environ.get("KNOXIS_MODE")  # "live" | "simulated" | "replay"
 # timestamps are old (live_feed_simulator.py replays historical days into the file).
 FEED_ACTIVE_S = float(os.environ.get("KNOXIS_FEED_ACTIVE_S", "30"))
 
+# Replay (as_of) strategy: "exact" re-runs the engine on truncated data for every position (always
+# correct, slow); "slice" cuts one full run (fast; valid only if the code is causal); "auto" uses
+# slice once a startup self-check has passed and falls back to exact otherwise.
+REPLAY_MODE = os.environ.get("KNOXIS_REPLAY", "auto")
+# In slice mode, an event's HEL1OS corroboration is reported only this long after its peak, because
+# the corroboration window may still be growing before that.
+PENDING_AFTER_PEAK_MIN = 35.0
+
+# Optional ground truth for /evaluation: CSV with start_time, peak_time (optional), end_time (optional), goes_class.
+TRUTH_FILE_PATH = Path(os.environ.get("KNOXIS_TRUTH_FILE", "data/truth/noaa_events.csv"))
+
+DASHBOARD_FILE = Path(os.environ.get(
+    "KNOXIS_DASHBOARD_FILE", str(Path(__file__).resolve().parent.parent / "dashboard" / "index.html")))
+
 DEFAULT_THRESHOLDS = {"watch": 0.3, "warning": 0.5, "alert": 0.7}
 LEVELS = ["QUIET", "WATCH", "WARNING", "ALERT"]
 LEVEL_CODE = {name: i for i, name in enumerate(LEVELS)}

@@ -20,16 +20,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import router
+from api.snapshot import latest_keeper
 from api.state import load_runtime
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_runtime()
-    yield
+    latest_keeper.start()
+    try:
+        yield
+    finally:
+        latest_keeper.stop()
 
 
 app = FastAPI(title="Knoxis API", lifespan=lifespan)
 
+# allow_origins=["*"] is fine for local use; restrict it before exposing this publicly.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 app.include_router(router)

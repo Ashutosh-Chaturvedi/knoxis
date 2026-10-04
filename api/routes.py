@@ -6,10 +6,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse
 
-from api.config import DATA_FILE_PATH, METRICS_FILE_PATH
+from api.config import DASHBOARD_FILE, DATA_FILE_PATH, METRICS_FILE_PATH
 from api.schemas import (FlareHistoryResponse, ForecastResponse, HealthResponse,
                          NowcastResponse, StatusResponse, TimeseriesResponse)
+from api.services.diagnostics import run_diagnostics
+from api.services.evaluation import compute_evaluation
 from api.services.forecast import compute_forecast
 from api.services.health import compute_health, resolve_mode
 from api.services.history import compute_history
@@ -22,6 +25,29 @@ from api.timeutil import py_dt
 router = APIRouter()
 
 AsOf = Query(None, description="ISO timestamp. Replays the system using only data up to this time.")
+
+
+@router.get("/", include_in_schema=False)
+def dashboard():
+    """Serves the dashboard from the API itself, so it is same-origin (no CORS, no second server)."""
+    if not DASHBOARD_FILE.exists():
+        return JSONResponse(status_code=404, content={
+            "detail": f"Dashboard file not found at {DASHBOARD_FILE}. Start uvicorn from the repo root "
+                      "or set KNOXIS_DASHBOARD_FILE."})
+    return FileResponse(DASHBOARD_FILE, media_type="text/html")
+
+
+@router.get("/diagnostics")
+def diagnostics():
+    """Checklist of what is configured and what is missing, with a hint for each failure."""
+    return run_diagnostics()
+
+
+@router.get("/evaluation")
+def evaluation():
+    """Nowcast detection statistics, hit rate / false alarms / latency vs a truth catalog (if provided),
+    and the offline batch metrics (if provided)."""
+    return compute_evaluation(get_snapshot(None))
 
 
 @router.get("/health", response_model=HealthResponse)
