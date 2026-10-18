@@ -60,8 +60,9 @@
   button:hover { border-color: var(--brand); }
   button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
   select { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; background: var(--surface); }
-  #chart { width: 100%; min-height: 340px; }
-  #chart .u-legend { font-size: 12px; }
+  #chart { width: 100%; min-height: 320px; }
+  #chart-hel { width: 100%; margin-top: 2px; }
+  .hover { min-height: 20px; margin-bottom: 4px; font-size: 13px; color: var(--ink-2); }
   .scrub { margin-top: 8px; }
   .scrub input { width: 100%; accent-color: var(--brand); }
   .scrub .ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-3); }
@@ -137,19 +138,24 @@
             <option value="0">All data</option>
           </select>
         </label>
-        <label><input id="chk-hel" type="checkbox" checked> HEL1OS</label>
+        <label><input id="chk-hel" type="checkbox" checked> HEL1OS panel</label>
         <button id="btn-latest" type="button">Jump to latest</button>
       </div>
-      <div id="chart" role="img" aria-label="SoLEXS flux with baseline, threshold and alert level shading"></div>
+      <div id="hover" class="hover" aria-live="off">Hover over the chart for values.</div>
+      <div id="chart" role="img" aria-label="SoLEXS flux with baseline, alert threshold and an alert-level strip"></div>
+      <div id="chart-hel" role="img" aria-label="HEL1OS counts, smoothed"></div>
       <div class="scrub">
         <input id="scrub" type="range" min="0" max="1" step="60" value="1" aria-label="Replay position" disabled>
         <div class="ends"><span id="scrub-start"></span><span id="scrub-pos"></span><span id="scrub-end"></span></div>
       </div>
       <div class="legend-key">
-        <span><span class="swatch" style="background:rgba(184,134,11,.35)"></span>Watch</span>
-        <span><span class="swatch" style="background:rgba(193,98,46,.4)"></span>Warning</span>
-        <span><span class="swatch" style="background:rgba(192,57,43,.45)"></span>Alert</span>
-        <span>Dashed vertical line: estimated onset. Solid vertical line: alert fired, after the sustain window.</span>
+        <span><span class="swatch" style="background:#16202C"></span>SoLEXS flux</span>
+        <span><span class="swatch" style="background:#2E5EAA"></span>Baseline</span>
+        <span><span class="swatch" style="background:#C1622E"></span>Alert threshold</span>
+        <span><span class="swatch" style="background:#D9A520"></span>Watch</span>
+        <span><span class="swatch" style="background:#C1622E"></span>Warning</span>
+        <span><span class="swatch" style="background:#C0392B"></span>Alert (strip along the top)</span>
+        <span>Red vertical line: alert fired, after the sustain window.</span>
       </div>
       <p class="note">Replay re-runs the system on data up to the chosen time only. Nothing after that point reaches the nowcast or forecast.
         Horizontal guides mark C1, M1 and X1 using the two-flare calibration, so treat them as indicative.</p>
@@ -240,7 +246,7 @@ const LEVEL_TEXT = { QUIET: "Quiet", WATCH: "Watch", WARNING: "Warning", ALERT: 
 const BAND = [null, "rgba(184,134,11,0.13)", "rgba(193,98,46,0.17)", "rgba(192,57,43,0.22)"];
 
 const $ = id => document.getElementById(id);
-const S = { cursor: null, span: null, playing: false, windowH: 6, ctl: null, chart: null, ts: null, debounce: null };
+const S = { cursor: null, span: null, playing: false, windowH: 6, ctl: null, chart: null, chartHel: null, ts: null, levels: [], debounce: null };
 
 /* ---------- helpers ---------- */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -396,87 +402,123 @@ function renderEvents(h) {
 }
 
 /* ---------- chart ---------- */
-function bandsPlugin() {
+const RIBBON = [null, "#D9A520", "#C1622E", "#C0392B"];      // watch, warning, alert
+const RIBBON_H = 7;                                           // css px, strip along the top of the plot
+
+// Levels flicker from bucket to bucket; drop WATCH/WARNING runs shorter than minRun buckets.
+function smoothLevels(lv, minRun = 4) {
+  const out = lv.slice(); let i = 0;
+  while (i < out.length) {
+    let j = i; while (j + 1 < out.length && out[j + 1] === out[i]) j++;
+    if (out[i] > 0 && out[i] < 3 && j - i + 1 < minRun) for (let k = i; k <= j; k++) out[k] = 0;
+    i = j + 1;
+  }
+  return out;
+}
+
+function smooth(a, k = 5) {
+  const h = k >> 1, out = new Array(a.length).fill(null);
+  for (let i = 0; i < a.length; i++) {
+    let sum = 0, n = 0;
+    for (let j = Math.max(0, i - h); j <= Math.min(a.length - 1, i + h); j++) if (a[j] != null) { sum += a[j]; n++; }
+    out[i] = n ? sum / n : null;
+  }
+  return out;
+}
+
+// Log axis: label decades only. Fall back to 1-2-5 when the range is under about one decade.
+function decadeSplits(u, axisIdx, min, max) {
+  const out = [], mult = Math.log10(max / min) < 1.2 ? [1, 2, 5] : [1];
+  for (let e = Math.floor(Math.log10(min)); e <= Math.ceil(Math.log10(max)); e++)
+    for (const m of mult) { const v = m * 10 ** e; if (v >= min && v <= max) out.push(v); }
+  return out;
+}
+
+function overlayPlugin() {
   return { hooks: {
-    drawClear: [u => {
-      const ts = S.ts; if (!ts || !ts.t.length) return;
-      const { ctx } = u, { top, height } = u.bbox;
+    drawClear: [u => {                       // alert-level strip; only ALERT also tints the plot
+      const ts = S.ts, lv = S.levels; if (!ts || !ts.t.length) return;
+      const { ctx } = u, { top, height } = u.bbox, dpr = devicePixelRatio || 1;
       let i = 0;
       while (i < ts.t.length) {
-        const lv = ts.level[i];
-        let j = i; while (j + 1 < ts.t.length && ts.level[j + 1] === lv) j++;
-        if (lv > 0 && BAND[lv]) {
-          const x0 = u.valToPos(ts.t[i], "x", true), x1 = u.valToPos(ts.t[Math.min(j + 1, ts.t.length - 1)], "x", true);
-          ctx.fillStyle = BAND[lv]; ctx.fillRect(x0, top, Math.max(x1 - x0, 1), height);
+        let j = i; while (j + 1 < ts.t.length && lv[j + 1] === lv[i]) j++;
+        const L = lv[i];
+        if (L > 0) {
+          const x0 = u.valToPos(ts.t[i], "x", true), x1 = u.valToPos(ts.t[Math.min(j + 1, ts.t.length - 1)], "x", true), w = Math.max(x1 - x0, 1);
+          if (L === 3) { ctx.fillStyle = "rgba(192,57,43,0.06)"; ctx.fillRect(x0, top, w, height); }
+          ctx.fillStyle = RIBBON[L]; ctx.fillRect(x0, top, w, RIBBON_H * dpr);
         }
         i = j + 1;
       }
     }],
-    draw: [u => {
+    draw: [u => {                            // detection markers and C/M/X guides
       const ts = S.ts; if (!ts) return;
       const { ctx } = u, { left, top, width, height } = u.bbox, dpr = devicePixelRatio || 1;
-      ctx.save(); ctx.lineWidth = 1 * dpr;
+      ctx.save(); ctx.font = (11 * dpr) + "px IBM Plex Sans, sans-serif";
+      ctx.lineWidth = dpr; ctx.setLineDash([]); ctx.strokeStyle = "rgba(192,57,43,0.7)"; ctx.fillStyle = "#C0392B"; ctx.textAlign = "left";
       for (const ev of ts.events) {
-        for (const [x, dash, col] of [[ev.onset, [4 * dpr, 3 * dpr], "#C1622E"], [ev.detection, [], "#C0392B"]]) {
-          const px = u.valToPos(x, "x", true);
-          if (px < left || px > left + width) continue;
-          ctx.strokeStyle = col; ctx.setLineDash(dash);
-          ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, top + height); ctx.stroke();
-        }
-        if (ev.goes_class) {
-          const px = u.valToPos(ev.detection, "x", true);
-          ctx.setLineDash([]); ctx.fillStyle = "#C0392B"; ctx.font = (11 * dpr) + "px IBM Plex Sans, sans-serif";
-          ctx.fillText(ev.goes_class, px + 4 * dpr, top + 12 * dpr);
-        }
+        const px = u.valToPos(ev.detection, "x", true);
+        if (px < left || px > left + width) continue;
+        ctx.beginPath(); ctx.moveTo(px, top + RIBBON_H * dpr); ctx.lineTo(px, top + height); ctx.stroke();
+        if (ev.goes_class) ctx.fillText(ev.goes_class, px + 4 * dpr, top + (RIBBON_H + 13) * dpr);
       }
-      // GOES class guides
       const y = u.scales.y;
-      ctx.font = (11 * dpr) + "px IBM Plex Sans, sans-serif"; ctx.fillStyle = "#8A919B"; ctx.strokeStyle = "#B8BEC7";
-      ctx.setLineDash([2 * dpr, 4 * dpr]);
+      ctx.fillStyle = "#9AA1AB"; ctx.strokeStyle = "#C9CED6"; ctx.setLineDash([2 * dpr, 4 * dpr]); ctx.textAlign = "right";
       for (const [label, w] of [["C1", 1e-6], ["M1", 1e-5], ["X1", 1e-4]]) {
         const counts = w / ts.goes_factor;
         if (!(counts > y.min && counts < y.max)) continue;
         const py = u.valToPos(counts, "y", true);
         ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(left + width, py); ctx.stroke();
-        ctx.fillText(label, left + 4 * dpr, py - 3 * dpr);
+        ctx.fillText(label, left + width - 4 * dpr, py - 3 * dpr);
       }
       ctx.restore();
+    }],
+    setCursor: [u => {                       // one readout line instead of a legend table
+      const el = $("hover"), i = u.cursor.idx, ts = S.ts;
+      if (i == null || !ts) { el.textContent = "Hover over the chart for values."; return; }
+      const f = u.data[1][i], b = u.data[2][i];
+      el.textContent = fmtUTC(ts.t[i]) + "   flux " + (f == null ? "-" : fmtNum(f) + " counts/s") +
+        "   baseline " + (b == null ? "-" : fmtNum(b)) + "   level " + (LEVEL_TEXT[ts.level_names[S.levels[i]]] || "-");
     }],
   } };
 }
 
-function buildChart(data) {
-  const el = $("chart");
+function buildCharts(fluxData, helData) {
+  const el = $("chart"), elH = $("chart-hel");
   if (S.chart) { S.chart.destroy(); S.chart = null; }
+  if (S.chartHel) { S.chartHel.destroy(); S.chartHel = null; }
   if (typeof uPlot === "undefined") { el.textContent = "Chart library failed to load."; return; }
-  const opts = {
-    width: el.clientWidth, height: 340,
-    tzDate: ts => uPlot.tzDate(new Date(ts * 1e3), "UTC"),
-    plugins: [bandsPlugin()],
-    cursor: { drag: { x: false, y: false } },
-    scales: { x: { time: true }, y: { distr: 3 }, h: { auto: true } },
-    axes: [
-      { stroke: "#55606E", grid: { stroke: "#E6EAF0", width: 1 } },
-      { stroke: "#55606E", grid: { stroke: "#E6EAF0", width: 1 }, label: "SoLEXS counts/s (log)", size: 70 },
-      { scale: "h", side: 1, stroke: "#5B8F8A", grid: { show: false }, label: "HEL1OS counts/s", size: 60 },
-    ],
-    series: [
-      {},
-      { label: "SoLEXS flux", stroke: "#16202C", width: 1.4, spanGaps: false },
-      { label: "Baseline", stroke: "#2E5EAA", width: 1.2 },
-      { label: "Alert threshold", stroke: "#C1622E", width: 1.2, dash: [5, 4] },
-      { label: "HEL1OS", scale: "h", stroke: "#5B8F8A", width: 1, show: $("chk-hel").checked },
-    ],
-  };
-  S.chart = new uPlot(opts, data, el);
+  const tzDate = ts => uPlot.tzDate(new Date(ts * 1e3), "UTC");
+  const axis = { stroke: "#6B7280", ticks: { show: false }, grid: { stroke: "#EDF0F4", width: 1 } };
+  const sync = { key: "knoxis" };
+  S.chart = new uPlot({
+    width: el.clientWidth, height: 320, tzDate, legend: { show: false }, plugins: [overlayPlugin()],
+    cursor: { drag: { x: false, y: false }, sync },
+    scales: { x: { time: true }, y: { distr: 3 } },
+    axes: [ { ...axis },
+            { ...axis, size: 70, label: "SoLEXS counts/s (log)", splits: decadeSplits, values: (u, v) => v.map(x => x.toLocaleString()) } ],
+    series: [ {},
+      { label: "SoLEXS flux", stroke: "#16202C", width: 1.3 },
+      { label: "Baseline", stroke: "#2E5EAA", width: 1 },
+      { label: "Alert threshold", stroke: "#C1622E", width: 1, dash: [4, 4] } ],
+  }, fluxData, el);
+  S.chartHel = new uPlot({
+    width: elH.clientWidth, height: 90, tzDate, legend: { show: false },
+    cursor: { drag: { x: false, y: false }, sync },
+    scales: { x: { time: true }, y: { auto: true } },
+    axes: [ { ...axis, show: false }, { ...axis, size: 70, label: "HEL1OS counts/s" } ],
+    series: [ {}, { label: "HEL1OS (smoothed)", stroke: "#5B8F8A", width: 1.1, fill: "rgba(91,143,138,0.16)" } ],
+  }, helData, elH);
 }
 
 function renderChart(ts) {
-  S.ts = ts;
+  S.ts = ts; S.levels = smoothLevels(ts.level);
   const pos = a => a.map(v => (v == null || v <= 0) ? null : v);
   const base = pos(ts.baseline);
-  const data = [ts.t, pos(ts.flux), base, base.map(b => b == null ? null : b * ts.threshold_ratio), ts.hel1os];
-  if (!S.chart) buildChart(data); else S.chart.setData(data);
+  const flux = [ts.t, pos(ts.flux), base, base.map(b => b == null ? null : b * ts.threshold_ratio)];
+  const hel = [ts.t, smooth(ts.hel1os, 5)];
+  if (!S.chart) buildCharts(flux, hel); else { S.chart.setData(flux); S.chartHel.setData(hel); }
+  $("chart-hel").style.display = $("chk-hel").checked ? "" : "none";
 }
 
 /* ---------- refresh loop ---------- */
@@ -575,7 +617,10 @@ async function playLoop() {
 $("btn-play").addEventListener("click", () => { S.playing ? stopPlay() : playLoop(); });
 $("btn-latest").addEventListener("click", () => { stopPlay(); S.cursor = null; refresh(); });
 $("sel-window").addEventListener("change", e => { S.windowH = Number(e.target.value); refresh(); });
-$("chk-hel").addEventListener("change", e => { if (S.chart) S.chart.setSeries(4, { show: e.target.checked }); });
+$("chk-hel").addEventListener("change", e => {
+  $("chart-hel").style.display = e.target.checked ? "" : "none";
+  if (e.target.checked && S.chartHel) S.chartHel.setSize({ width: $("chart-hel").clientWidth, height: 90 });
+});
 $("scrub").addEventListener("input", e => {
   stopPlay();
   const v = Number(e.target.value);
@@ -583,7 +628,10 @@ $("scrub").addEventListener("input", e => {
   setText("scrub-pos", S.cursor == null ? "Latest sample" : fmtUTC(S.cursor));
   scheduleRefresh();
 });
-window.addEventListener("resize", () => { if (S.chart) S.chart.setSize({ width: $("chart").clientWidth, height: 340 }); });
+window.addEventListener("resize", () => {
+  if (S.chart) S.chart.setSize({ width: $("chart").clientWidth, height: 320 });
+  if (S.chartHel && $("chk-hel").checked) S.chartHel.setSize({ width: $("chart-hel").clientWidth, height: 90 });
+});
 
 /* ---------- start ---------- */
 refresh().then(loadEvaluation);

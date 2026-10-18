@@ -1,4 +1,3 @@
-"""HTTP endpoints. Thin: parse params, get a snapshot, call a service."""
 from __future__ import annotations
 
 import json
