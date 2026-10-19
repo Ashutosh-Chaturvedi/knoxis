@@ -9,6 +9,22 @@ from pydantic import BaseModel
 from api.config import GOES_FACTOR, LEVELS, SUSTAIN_MINUTES, THRESHOLD_RATIO
 
 
+class DayInfo(BaseModel):
+    day: str                                    # UTC date, YYYY-MM-DD
+    start: datetime                             # first sample of that date
+    end: datetime                               # last sample of that date
+    rows: int
+    hours: float
+    leadin_ok: bool                             # enough earlier data to warm the baseline at 00:00
+
+
+class DaysResponse(BaseModel):
+    days: list[DayInfo]
+    live_available: bool
+    days_dir: str
+    leadin_hours: float
+
+
 class NowcastResponse(BaseModel):
     as_of: Optional[datetime] = None
     alert_level: Optional[str] = None
@@ -42,7 +58,8 @@ class DataHealth(BaseModel):
 
 
 class StatusResponse(BaseModel):
-    mode: str                                   # "live" | "simulated" | "replay"
+    mode: str                                   # "live" | "simulated" | "archive" | "replay"
+    day_info: Optional[DayInfo] = None          # set when a day was selected
     server_time: datetime
     data_time: Optional[datetime] = None        # last sample included in this response
     data_age_s: Optional[float] = None          # server time minus newest sample time

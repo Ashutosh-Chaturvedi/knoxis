@@ -4,8 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from api.config import (DASHBOARD_FILE, DATA_FILE_PATH, GOES_FACTOR, META_FILE_PATH, METRICS_FILE_PATH,
-                        MODEL_FILE_PATH, REPLAY_MODE, SUSTAIN_MINUTES, THRESHOLD_RATIO, TRUTH_FILE_PATH)
-from api.snapshot import latest_keeper
+                        MODEL_FILE_PATH, REPLAY_MODE, DAYS_DIR, LEADIN_HOURS, SUSTAIN_MINUTES, THRESHOLD_RATIO, TRUTH_FILE_PATH)
+from api.daystore import day_store
+from api.snapshot import latest_keeper, replay_gate
 from api.state import runtime
 
 REQUIRED_COLUMNS = ["solexs_counts", "solexs_is_valid", "hel1os_ctr", "hel1os_is_valid"]
@@ -46,6 +47,15 @@ def run_diagnostics() -> dict:
             age = (now - snap.file_updated).total_seconds()
             add("Data file freshness", True, f"last written {age:.0f}s ago", required=False)
 
+    days = day_store.scan()
+    add("Day archive", bool(days), f"{len(days)} day(s) in {DAYS_DIR}" + (f": {days[0].day} to {days[-1].day}" if days else ""),
+        "Optional: put parquet files (one per day or multi-day) in this folder to enable the date selector. "
+        "Set KNOXIS_DAYS_DIR to use another folder.", required=False)
+    short = [d.day for d in days if not d.leadin_ok]
+    if short:
+        add("Day lead-in", False, f"no {LEADIN_HOURS:g} h of earlier data for: " + ", ".join(short[:8]),
+            "The baseline is unavailable for the start of those days. Add the previous day's data to the folder.",
+            required=False)
     add("Forecast model", runtime.model is not None, str(MODEL_FILE_PATH),
         "Train it or set KNOXIS_MODEL_FILE. Without it the forecast panel reports 'not loaded'.", required=False)
     add("Model metadata", bool(runtime.meta), str(META_FILE_PATH),
@@ -64,8 +74,8 @@ def run_diagnostics() -> dict:
         "config": {
             "threshold_ratio": THRESHOLD_RATIO, "sustain_minutes": SUSTAIN_MINUTES, "goes_factor": GOES_FACTOR,
             "forecast_thresholds": runtime.thresholds, "replay_setting": REPLAY_MODE,
-            "replay_strategy": latest_keeper.replay_strategy(),
-            "causality_self_check": latest_keeper.causal_detail,
-            "causality_self_check_passed": latest_keeper.causal,
+            "replay_strategy": replay_gate.strategy(),
+            "causality_self_check": replay_gate.detail,
+            "causality_self_check_passed": replay_gate.causal,
         },
     }

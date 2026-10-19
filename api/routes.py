@@ -1,3 +1,4 @@
+"""HTTP endpoints. Thin: parse params, get a snapshot, call a service."""
 from __future__ import annotations
 
 import json
@@ -7,8 +8,9 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 
-from api.config import DASHBOARD_FILE, DATA_FILE_PATH, METRICS_FILE_PATH
-from api.schemas import (FlareHistoryResponse, ForecastResponse, HealthResponse,
+from api.config import DASHBOARD_FILE, DATA_FILE_PATH, DAYS_DIR, LEADIN_HOURS, METRICS_FILE_PATH
+from api.daystore import day_store
+from api.schemas import (DaysResponse, FlareHistoryResponse, ForecastResponse, HealthResponse,
                          NowcastResponse, StatusResponse, TimeseriesResponse)
 from api.services.diagnostics import run_diagnostics
 from api.services.evaluation import compute_evaluation
@@ -24,6 +26,7 @@ from api.timeutil import py_dt
 router = APIRouter()
 
 AsOf = Query(None, description="ISO timestamp. Replays the system using only data up to this time.")
+Day = Query(None, description="UTC date, YYYY-MM-DD. Selects a day from the archive instead of the live file.")
 
 
 @router.get("/", include_in_schema=False)
@@ -36,6 +39,13 @@ def dashboard():
     return FileResponse(DASHBOARD_FILE, media_type="text/html")
 
 
+@router.get("/days", response_model=DaysResponse)
+def days():
+    """Days available in the archive folder (UTC dates), and whether a live file exists."""
+    return DaysResponse(days=day_store.scan(), live_available=DATA_FILE_PATH.exists(),
+                        days_dir=str(DAYS_DIR), leadin_hours=LEADIN_HOURS)
+
+
 @router.get("/diagnostics")
 def diagnostics():
     """Checklist of what is configured and what is missing, with a hint for each failure."""
@@ -43,10 +53,10 @@ def diagnostics():
 
 
 @router.get("/evaluation")
-def evaluation():
+def evaluation(day: Optional[str] = Day):
     """Nowcast detection statistics, hit rate / false alarms / latency vs a truth catalog (if provided),
     and the offline batch metrics (if provided)."""
-    return compute_evaluation(get_snapshot(None))
+    return compute_evaluation(get_snapshot(None, day))
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -56,12 +66,13 @@ def health():
 
 
 @router.get("/status", response_model=StatusResponse)
-def status(as_of: Optional[str] = AsOf):
-    snap = get_snapshot(as_of)
+def status(as_of: Optional[str] = AsOf, day: Optional[str] = Day):
+    snap = get_snapshot(as_of, day)
     last = py_dt(snap.df.index[-1]) if len(snap.df) else None
     now = datetime.now(timezone.utc)
     return StatusResponse(
-        mode=resolve_mode(snap, as_of), server_time=now, data_time=last,
+        mode=resolve_mode(snap, as_of, day), server_time=now,
+        day_info=day_store.info(day) if day else None, data_time=last,
         data_age_s=(now - last).total_seconds() if last else None,
         file_age_s=(now - snap.file_updated).total_seconds(),
         span_start=snap.span_start, span_end=snap.span_end,
@@ -69,24 +80,24 @@ def status(as_of: Optional[str] = AsOf):
 
 
 @router.get("/nowcast", response_model=NowcastResponse)
-def nowcast(as_of: Optional[str] = AsOf):
-    return compute_nowcast(get_snapshot(as_of))
+def nowcast(as_of: Optional[str] = AsOf, day: Optional[str] = Day):
+    return compute_nowcast(get_snapshot(as_of, day))
 
 
 @router.get("/forecast", response_model=ForecastResponse)
-def forecast(as_of: Optional[str] = AsOf):
-    return compute_forecast(get_snapshot(as_of))
+def forecast(as_of: Optional[str] = AsOf, day: Optional[str] = Day):
+    return compute_forecast(get_snapshot(as_of, day))
 
 
 @router.get("/flare-history", response_model=FlareHistoryResponse)
-def flare_history(as_of: Optional[str] = AsOf, max_events: int = Query(10, ge=1, le=100)):
-    return compute_history(get_snapshot(as_of), max_events)
+def flare_history(as_of: Optional[str] = AsOf, day: Optional[str] = Day, max_events: int = Query(10, ge=1, le=100)):
+    return compute_history(get_snapshot(as_of, day), max_events)
 
 
 @router.get("/timeseries", response_model=TimeseriesResponse)
-def timeseries(as_of: Optional[str] = AsOf, start: Optional[str] = None, end: Optional[str] = None,
-               max_points: int = Query(1500, ge=50, le=5000)):
-    return compute_timeseries(get_snapshot(as_of), start, end, max_points)
+def timeseries(as_of: Optional[str] = AsOf, day: Optional[str] = Day, start: Optional[str] = None,
+               end: Optional[str] = None, max_points: int = Query(1500, ge=50, le=5000)):
+    return compute_timeseries(get_snapshot(as_of, day), start, end, max_points)
 
 
 @router.get("/metrics")

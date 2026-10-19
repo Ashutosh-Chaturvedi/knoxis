@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
+from api.daystore import day_store
 from api.config import DATA_FILE_PATH, FEATURE_COLUMNS, PENDING_AFTER_PEAK_MIN, REPLAY_MODE
 from api.state import runtime
 from api.timeutil import align, py_dt
@@ -72,16 +73,9 @@ def load_current_data() -> pd.DataFrame:
     return df.sort_index()
 
 
-def build_snapshot(as_of: Optional[pd.Timestamp], st: os.stat_result) -> Snapshot:
-    """Caller must hold _build_lock."""
-    df = load_current_data()
-    span_start = py_dt(df.index[0]) if len(df) else None
-    span_end = py_dt(df.index[-1]) if len(df) else None
-    updated = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
-
-    if as_of is not None:
-        # Causality: the engine and the feature code never see rows after as_of.
-        df = df.loc[: align(as_of, df.index)]
+def compute_snapshot(df: pd.DataFrame, updated: datetime, span_start: Optional[datetime],
+                     span_end: Optional[datetime], label: str = "") -> Snapshot:
+    """Engine and forecast features on `df`. Caller must hold _build_lock."""
     if df.empty:
         return Snapshot(df, None, None, None, span_start, span_end, updated)
 
@@ -97,9 +91,21 @@ def build_snapshot(as_of: Optional[pd.Timestamp], st: os.stat_result) -> Snapsho
             log.exception("compute_day_features failed")
             ferr = f"{type(exc).__name__}: {exc}"
     t2 = time.perf_counter()
-    log.info("snapshot rows=%d as_of=%s engine.run=%.2fs features=%.2fs",
-             len(df), as_of, t1 - t0, t2 - t1)
+    log.info("snapshot rows=%d %s engine.run=%.2fs features=%.2fs", len(df), label, t1 - t0, t2 - t1)
     return Snapshot(df, nowcast, features, ferr, span_start, span_end, updated)
+
+
+def build_snapshot(as_of: Optional[pd.Timestamp], st: os.stat_result) -> Snapshot:
+    """The live file, optionally truncated at as_of. Caller must hold _build_lock."""
+    df = load_current_data()
+    span_start = py_dt(df.index[0]) if len(df) else None
+    span_end = py_dt(df.index[-1]) if len(df) else None
+    updated = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+
+    if as_of is not None:
+        # Causality: the engine and the feature code never see rows after as_of.
+        df = df.loc[: align(as_of, df.index)]
+    return compute_snapshot(df, updated, span_start, span_end, label=f"live as_of={as_of}")
 
 
 def _mask_catalog(cat: pd.DataFrame, cut: pd.Timestamp) -> pd.DataFrame:
@@ -184,6 +190,45 @@ def verify_causality(full: Snapshot) -> tuple[bool, str]:
     return True, f"verified at {len(positions)} sample point(s)"
 
 
+class ReplayGate:
+    """Decides between slice and exact replay. The sample-based causality self-check runs on any full
+    snapshot (live file or a loaded day) and only ever downgrades: one failure disables slice mode."""
+
+    def __init__(self) -> None:
+        self.causal: Optional[bool] = None          # None = not checked yet
+        self.detail = "not checked yet"
+        self._verified_settled = -1
+
+    def strategy(self) -> str:
+        if REPLAY_MODE == "slice":
+            return "slice"
+        if REPLAY_MODE == "auto" and self.causal is True:
+            return "slice"
+        return "exact"
+
+    def check(self, full: Snapshot, locked: bool) -> None:
+        if full.nowcast is None:
+            return
+        settled = _settled_events(full)
+        if settled <= self._verified_settled:
+            return
+        self._verified_settled = settled
+        try:
+            if locked:
+                ok, detail = verify_causality(full)
+            else:
+                with _build_lock:
+                    ok, detail = verify_causality(full)
+        except Exception as exc:
+            ok, detail = False, f"self-check failed: {type(exc).__name__}: {exc}"
+        self.causal = ok if self.causal is None else (self.causal and ok)
+        self.detail = detail
+        (log.info if ok else log.warning)("causality self-check: %s", detail)
+
+
+replay_gate = ReplayGate()
+
+
 class LRUCache:
     """Small cache for as_of snapshots. The lock guards the dict only; builds happen outside it
     (under _build_lock), so lookups are never blocked by a build in progress."""
@@ -234,9 +279,6 @@ class LatestKeeper:
         self.builds = 0
         self.last_build_s: Optional[float] = None
         self.last_error: Optional[str] = None
-        self.causal: Optional[bool] = None          # None = not checked yet
-        self.causal_detail = "not checked yet"
-        self._verified_settled = -1
 
     def start(self) -> None:
         self._stop.clear()
@@ -253,28 +295,8 @@ class LatestKeeper:
         with self._lock:
             return self._snap
 
-    def replay_strategy(self) -> str:
-        if REPLAY_MODE == "slice":
-            return "slice"
-        if REPLAY_MODE == "auto" and self.causal is True:
-            return "slice"
-        return "exact"
-
     def _maybe_verify(self, snap: Snapshot) -> None:
-        if snap.nowcast is None:
-            return
-        settled = _settled_events(snap)
-        if settled <= self._verified_settled:
-            return
-        self._verified_settled = settled
-        try:
-            with _build_lock:
-                ok, detail = verify_causality(snap)
-        except Exception as exc:
-            ok, detail = False, f"self-check failed: {type(exc).__name__}: {exc}"
-        self.causal = ok if self.causal is None else (self.causal and ok)
-        self.causal_detail = detail
-        (log.info if ok else log.warning)("causality self-check: %s", detail)
+        replay_gate.check(snap, locked=False)
 
     def latest(self, wait_s: float = 60.0) -> Optional[Snapshot]:
         if self._snap is None and self._thread is not None:
@@ -315,7 +337,70 @@ class LatestKeeper:
 latest_keeper = LatestKeeper()
 
 
-def get_snapshot(as_of: Optional[str]) -> Snapshot:
+@dataclass
+class DayEntry:
+    full: Snapshot          # lead-in plus the day, exactly as the engine saw it
+    view: Snapshot          # restricted to the selected day
+    day_start: pd.Timestamp
+
+
+_day_cache = LRUCache(size=4)
+
+
+def _cut_from(full: Snapshot, start: pd.Timestamp) -> Snapshot:
+    """The part of a full run that belongs to the day (everything from `start` on)."""
+    if full.df.empty or full.nowcast is None:
+        return full
+    df = full.df.loc[start:]
+    if df.empty:
+        return Snapshot(df, None, None, None, None, None, full.file_updated)
+    res = full.nowcast
+    cat = res.get("flare_catalog")
+    if cat is not None and len(cat) > 0:
+        cat = cat[cat["detection_time"] >= start]
+    nowcast = {**res, "baseline": res["baseline"].loc[start:], "alert_level": res["alert_level"].loc[start:],
+               "flare_catalog": cat}
+    feats = full.features.loc[start:] if full.features is not None else None
+    return Snapshot(df, nowcast, feats, full.feature_error, py_dt(df.index[0]), py_dt(df.index[-1]),
+                    full.file_updated)
+
+
+def build_day_entry(day: str) -> DayEntry:
+    """Caller holds _build_lock."""
+    df, day_start = day_store.load_day(day)
+    full = compute_snapshot(df, datetime.now(timezone.utc), py_dt(df.index[0]), py_dt(df.index[-1]),
+                            label=f"day={day}")
+    replay_gate.check(full, locked=True)
+    return DayEntry(full, _cut_from(full, day_start), day_start)
+
+
+def _parse_as_of(as_of: str) -> pd.Timestamp:
+    try:
+        return pd.Timestamp(as_of)
+    except (ValueError, TypeError):
+        raise HTTPException(422, f"as_of is not a valid timestamp: {as_of!r}")
+
+
+def get_day_snapshot(day: str, as_of: Optional[str]) -> Snapshot:
+    sig = day_store.signature()
+    entry = _day_cache.get(("day", day, sig), lambda: build_day_entry(day))
+    if not as_of:
+        return entry.view
+    parsed = _parse_as_of(as_of)
+    if replay_gate.strategy() == "slice":
+        return slice_snapshot(entry.view, parsed)
+
+    def build() -> Snapshot:
+        cut = entry.full.df.loc[: align(parsed, entry.full.df.index)]
+        snap = compute_snapshot(cut, entry.full.file_updated, entry.full.span_start, entry.full.span_end,
+                                label=f"day={day} as_of={as_of}")
+        return _cut_from(snap, entry.day_start)
+    return _cache.get(("day-exact", day, sig, parsed.value), build)
+
+
+def get_snapshot(as_of: Optional[str], day: Optional[str] = None) -> Snapshot:
+    if day:
+        return get_day_snapshot(day, as_of)
     st = stat_data_file()                    # 503 if the file is missing
     if not as_of:
         snap = latest_keeper.latest()
@@ -327,7 +412,7 @@ def get_snapshot(as_of: Optional[str]) -> Snapshot:
             parsed = pd.Timestamp(as_of)
         except (ValueError, TypeError):
             raise HTTPException(422, f"as_of is not a valid timestamp: {as_of!r}")
-        if latest_keeper.replay_strategy() == "slice":
+        if replay_gate.strategy() == "slice":
             full = latest_keeper.peek()
             if full is not None:
                 return slice_snapshot(full, parsed)

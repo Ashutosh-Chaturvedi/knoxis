@@ -25,9 +25,11 @@ def compute_health(snap: Snapshot) -> DataHealth:
                       file_updated=snap.file_updated)
 
 
-def resolve_mode(snap: Snapshot, as_of: Optional[str]) -> str:
+def resolve_mode(snap: Snapshot, as_of: Optional[str], day: Optional[str] = None) -> str:
     if as_of:
         return "replay"
+    if day:
+        return "archive"
     if MODE_OVERRIDE in ("live", "simulated", "replay"):
         return MODE_OVERRIDE
     if snap.df.empty:

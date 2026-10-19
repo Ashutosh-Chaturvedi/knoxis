@@ -14,6 +14,14 @@ FEATURE_COLUMNS = [
 DATA_FILE_PATH = Path(os.environ.get("KNOXIS_DATA_FILE", "data/training/output/latest_data.parquet"))
 MODEL_FILE_PATH = Path(os.environ.get("KNOXIS_MODEL_FILE", "data/training/output/knoxis_binary_flare_model.joblib"))
 META_FILE_PATH = Path(os.environ.get("KNOXIS_META_FILE", str(MODEL_FILE_PATH.with_name("model_meta.json"))))
+# Multi-day archive: a folder of parquet files (one per day, or multi-day, overlap allowed).
+# Days are UTC dates found from the timestamps; no naming convention is needed.
+DAYS_DIR = Path(os.environ.get("KNOXIS_DAYS_DIR", "data/days"))
+# History loaded before the selected day so the trailing baseline is warm at 00:00.
+LEADIN_HOURS = float(os.environ.get("KNOXIS_LEADIN_HOURS", "24"))
+# A date with fewer samples than this (for example a sliver of lead-in) is not listed as a day.
+MIN_DAY_ROWS = int(os.environ.get("KNOXIS_MIN_DAY_ROWS", "600"))
+
 METRICS_FILE_PATH = Path(os.environ.get("KNOXIS_METRICS_FILE", "data/training/output/metrics.json"))
 
 # Display-only; must match NowcastEngine. The engine remains the source of truth for levels.
