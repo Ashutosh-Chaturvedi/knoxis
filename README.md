@@ -141,7 +141,7 @@ knoxis/
 │   │   ├── forecast_alert.py       probability thresholds to WATCH / WARNING / ALERT
 │   │   ├── ingest_new_day.py       one command to add a newly downloaded day to the live file
 │   │   └── simulate_live_playback.py   checks that batch and incremental computation agree
-│   ├── archieve/                   model training scripts (folder name spelled this way in the repo)
+│   ├── archive/                   model training scripts 
 │   │   ├── train_binary_flare_model.py   current model: binary flare / no flare, LightGBM
 │   │   ├── tune_binary_flare_model.py    randomised hyperparameter search for the binary model
 │   │   ├── train_model.py                superseded: original 5-class Random Forest
