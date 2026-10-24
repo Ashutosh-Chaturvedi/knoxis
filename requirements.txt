@@ -40,7 +40,7 @@ joblib==1.6.0
 jupyter_client==8.9.1
 jupyter_core==5.9.1
 kiwisolver==1.5.0
--e git+https://github.com/Ashutosh-Chaturvedi/knoxis.git@240539ef0a6aff6b30a0e26e491e40caba0890cb#egg=knoxis
+-e git+https://github.com/Ashutosh-Chaturvedi/knoxis.git@265400d2adc926c8ce9aed12278aeb8ef8ee4863#egg=knoxis
 lightgbm==4.7.0
 Mako==1.4.1
 markdown-it-py==4.2.0

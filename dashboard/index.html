@@ -3,14 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<script>
-(function () {
-  var t = null;
-  try { t = localStorage.getItem("knoxis-theme"); } catch (_) {}
-  if (t !== "dark" && t !== "light") t = (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
-  document.documentElement.setAttribute("data-theme", t);
-})();
-</script>
 <title>Knoxis: solar flare monitor</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -31,42 +23,6 @@
     --warning: #C1622E;
     --alert: #C0392B;
     --stale: #8A919B;
-    --header-bg: var(--brand);
-    --err-bg: #FBEAE9;  --err-fg: #8E2A20;
-    --info-bg: #E7EEF9; --info-fg: #23477F;
-    --warn-bg: #FBF1D8; --warn-fg: #6B4E06;
-    /* chart colours (read by the canvas drawing code) */
-    --c-flux: #16202C; --c-base: #2E5EAA; --c-thr: #C1622E;
-    --c-watch: #D9A520; --c-warn: #C1622E; --c-alert: #C0392B;
-    --c-grid: #EDF0F4; --c-axis: #6B7280;
-    --c-guide: #C9CED6; --c-guide-text: #9AA1AB;
-    --c-alert-line: rgba(192,57,43,0.7); --c-alert-tint: rgba(192,57,43,0.06);
-    --c-hel: #5B8F8A; --c-hel-fill: rgba(91,143,138,0.16);
-  }
-  :root[data-theme="dark"] {
-    color-scheme: dark;
-    --paper: #0E141B;
-    --surface: #151D27;
-    --ink: #E6EBF2;
-    --ink-2: #A4AEBB;
-    --ink-3: #7C8694;
-    --rule: #2A3542;
-    --brand: #3F72C9;
-    --quiet: #4FBF86;
-    --watch: #E0B341;
-    --warning: #E8864F;
-    --alert: #EF6A5B;
-    --stale: #7C8694;
-    --header-bg: #17233A;
-    --err-bg: #3A1D1B;  --err-fg: #F4B2AB;
-    --info-bg: #172640; --info-fg: #A9C4F2;
-    --warn-bg: #3A2F10; --warn-fg: #EBCB7A;
-    --c-flux: #E6EBF2; --c-base: #6FA0EA; --c-thr: #E8864F;
-    --c-watch: #E0B341; --c-warn: #E8864F; --c-alert: #EF6A5B;
-    --c-grid: #243040; --c-axis: #8D97A5;
-    --c-guide: #3A4757; --c-guide-text: #7C8694;
-    --c-alert-line: rgba(239,106,91,0.75); --c-alert-tint: rgba(239,106,91,0.12);
-    --c-hel: #6FB5AE; --c-hel-fill: rgba(111,181,174,0.18);
   }
   * { box-sizing: border-box; }
   body {
@@ -77,20 +33,20 @@
   a, button, select, input { font: inherit; }
   :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-  header { background: var(--header-bg); color: #fff; }
+  header { background: var(--brand); color: #fff; }
   .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
   .bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 0; flex-wrap: wrap; }
   h1 { margin: 0; font-size: 22px; font-weight: 600; }
   .sub { margin: 2px 0 0; font-size: 13px; color: #C9D8F2; }
   .mode { text-align: right; font-size: 13px; color: #C9D8F2; }
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; color: #16202C; background: #fff; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 600; color: var(--ink); background: #fff; }
   .badge.live { background: #CDEBD9; }
   .badge.replay { background: #FBE7B5; }
 
   .banner { display: none; margin: 16px 0 0; padding: 10px 14px; border-radius: 6px; font-size: 14px; }
-  .banner.error { background: var(--err-bg); color: var(--err-fg); }
-  .banner.info { background: var(--info-bg); color: var(--info-fg); }
-  .banner.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .banner.error { background: #FBEAE9; color: #8E2A20; }
+  .banner.info { background: #E7EEF9; color: #23477F; }
+  .banner.warn { background: #FBF1D8; color: #6B4E06; }
 
   main { padding: 20px 0 48px; }
   section { margin-top: 24px; }
@@ -103,10 +59,7 @@
   button { border: 1px solid var(--rule); background: var(--surface); color: var(--ink); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
   button:hover { border-color: var(--brand); }
   button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
-  select { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; background: var(--surface); color: var(--ink); }
-  .hright { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-  .theme-btn { background: transparent; color: #fff; border-color: rgba(255,255,255,0.45); }
-  .theme-btn:hover { border-color: #fff; }
+  select { border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; background: var(--surface); }
   #chart { width: 100%; min-height: 320px; }
   #chart-hel { width: 100%; margin-top: 2px; }
   .hover { min-height: 20px; margin-bottom: 4px; font-size: 13px; color: var(--ink-2); }
@@ -153,12 +106,9 @@
       <h1>Knoxis</h1>
       <p class="sub">Solar flare nowcasting and forecasting from Aditya-L1 SoLEXS and HEL1OS</p>
     </div>
-    <div class="hright">
-      <button id="btn-theme" class="theme-btn" type="button">Dark mode</button>
-      <div class="mode" aria-live="polite">
-        <span id="mode-badge" class="badge">Connecting</span>
-        <div id="data-time">Waiting for the API</div>
-      </div>
+    <div class="mode" aria-live="polite">
+      <span id="mode-badge" class="badge">Connecting</span>
+      <div id="data-time">Waiting for the API</div>
     </div>
   </div>
 </header>
@@ -202,12 +152,12 @@
         <div class="ends"><span id="scrub-start"></span><span id="scrub-pos"></span><span id="scrub-end"></span></div>
       </div>
       <div class="legend-key">
-        <span><span class="swatch" style="background:var(--c-flux)"></span>SoLEXS flux</span>
-        <span><span class="swatch" style="background:var(--c-base)"></span>Baseline</span>
-        <span><span class="swatch" style="background:var(--c-thr)"></span>Alert threshold</span>
-        <span><span class="swatch" style="background:var(--c-watch)"></span>Watch</span>
-        <span><span class="swatch" style="background:var(--c-warn)"></span>Warning</span>
-        <span><span class="swatch" style="background:var(--c-alert)"></span>Alert (strip along the top)</span>
+        <span><span class="swatch" style="background:#16202C"></span>SoLEXS flux</span>
+        <span><span class="swatch" style="background:#2E5EAA"></span>Baseline</span>
+        <span><span class="swatch" style="background:#C1622E"></span>Alert threshold</span>
+        <span><span class="swatch" style="background:#D9A520"></span>Watch</span>
+        <span><span class="swatch" style="background:#C1622E"></span>Warning</span>
+        <span><span class="swatch" style="background:#C0392B"></span>Alert (strip along the top)</span>
         <span>Red vertical line: alert fired, after the sustain window.</span>
       </div>
       <p class="note">Replay re-runs the system on data up to the chosen time only. Nothing after that point reaches the nowcast or forecast.
@@ -262,7 +212,7 @@
     </div>
   </section>
 
-  <section aria-labelledby="h-diag">
+  <section id="sec-diag" aria-labelledby="h-diag">
     <h2 id="h-diag">Diagnostics</h2>
     <div class="panel scroll">
       <p class="note" style="margin-top:0">Checks that the API, data file, model and optional inputs are in place, and says what to fix.</p>
@@ -334,7 +284,7 @@ async function api(path, parent) {
     const r = await fetch(API + path, { signal: ctl.signal });
     if (!r.ok) {
       let d = ""; try { d = (await r.json()).detail; } catch (_) {}
-      throw new Error(d || "HTTP " + r.status);
+      const e = new Error(d || "HTTP " + r.status); e.http = r.status; throw e;
     }
     return await r.json();
   } finally { clearTimeout(timer); }
@@ -460,18 +410,7 @@ function renderEvents(h) {
 }
 
 /* ---------- chart ---------- */
-const PAL = {};                                               // chart colours, read from the CSS variables of the active theme
-const RIBBON = [null, null, null, null];                      // watch, warning, alert (filled by readPalette)
-function readPalette() {
-  const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
-  Object.assign(PAL, {
-    flux: v("--c-flux"), base: v("--c-base"), thr: v("--c-thr"), watch: v("--c-watch"), warn: v("--c-warn"), alert: v("--c-alert"),
-    grid: v("--c-grid"), axis: v("--c-axis"), guide: v("--c-guide"), guideText: v("--c-guide-text"),
-    alertLine: v("--c-alert-line"), alertTint: v("--c-alert-tint"), hel: v("--c-hel"), helFill: v("--c-hel-fill"),
-  });
-  RIBBON[1] = PAL.watch; RIBBON[2] = PAL.warn; RIBBON[3] = PAL.alert;
-}
-readPalette();
+const RIBBON = [null, "#D9A520", "#C1622E", "#C0392B"];      // watch, warning, alert
 const RIBBON_H = 7;                                           // css px, strip along the top of the plot
 
 // Levels flicker from bucket to bucket; drop WATCH/WARNING runs shorter than minRun buckets.
@@ -514,7 +453,7 @@ function overlayPlugin() {
         const L = lv[i];
         if (L > 0) {
           const x0 = u.valToPos(ts.t[i], "x", true), x1 = u.valToPos(ts.t[Math.min(j + 1, ts.t.length - 1)], "x", true), w = Math.max(x1 - x0, 1);
-          if (L === 3) { ctx.fillStyle = PAL.alertTint; ctx.fillRect(x0, top, w, height); }
+          if (L === 3) { ctx.fillStyle = "rgba(192,57,43,0.06)"; ctx.fillRect(x0, top, w, height); }
           ctx.fillStyle = RIBBON[L]; ctx.fillRect(x0, top, w, RIBBON_H * dpr);
         }
         i = j + 1;
@@ -524,7 +463,7 @@ function overlayPlugin() {
       const ts = S.ts; if (!ts) return;
       const { ctx } = u, { left, top, width, height } = u.bbox, dpr = devicePixelRatio || 1;
       ctx.save(); ctx.font = (11 * dpr) + "px IBM Plex Sans, sans-serif";
-      ctx.lineWidth = dpr; ctx.setLineDash([]); ctx.strokeStyle = PAL.alertLine; ctx.fillStyle = PAL.alert; ctx.textAlign = "left";
+      ctx.lineWidth = dpr; ctx.setLineDash([]); ctx.strokeStyle = "rgba(192,57,43,0.7)"; ctx.fillStyle = "#C0392B"; ctx.textAlign = "left";
       for (const ev of ts.events) {
         const px = u.valToPos(ev.detection, "x", true);
         if (px < left || px > left + width) continue;
@@ -532,7 +471,7 @@ function overlayPlugin() {
         if (ev.goes_class) ctx.fillText(ev.goes_class, px + 4 * dpr, top + (RIBBON_H + 13) * dpr);
       }
       const y = u.scales.y;
-      ctx.fillStyle = PAL.guideText; ctx.strokeStyle = PAL.guide; ctx.setLineDash([2 * dpr, 4 * dpr]); ctx.textAlign = "right";
+      ctx.fillStyle = "#9AA1AB"; ctx.strokeStyle = "#C9CED6"; ctx.setLineDash([2 * dpr, 4 * dpr]); ctx.textAlign = "right";
       for (const [label, w] of [["C1", 1e-6], ["M1", 1e-5], ["X1", 1e-4]]) {
         const counts = w / ts.goes_factor;
         if (!(counts > y.min && counts < y.max)) continue;
@@ -558,7 +497,7 @@ function buildCharts(fluxData, helData) {
   if (S.chartHel) { S.chartHel.destroy(); S.chartHel = null; }
   if (typeof uPlot === "undefined") { el.textContent = "Chart library failed to load."; return; }
   const tzDate = ts => uPlot.tzDate(new Date(ts * 1e3), "UTC");
-  const axis = { stroke: PAL.axis, ticks: { show: false }, grid: { stroke: PAL.grid, width: 1 } };
+  const axis = { stroke: "#6B7280", ticks: { show: false }, grid: { stroke: "#EDF0F4", width: 1 } };
   const sync = { key: "knoxis" };
   S.chart = new uPlot({
     width: el.clientWidth, height: 320, tzDate, legend: { show: false }, plugins: [overlayPlugin()],
@@ -567,16 +506,16 @@ function buildCharts(fluxData, helData) {
     axes: [ { ...axis },
             { ...axis, size: 70, label: "SoLEXS counts/s (log)", splits: decadeSplits, values: (u, v) => v.map(x => x.toLocaleString()) } ],
     series: [ {},
-      { label: "SoLEXS flux", stroke: PAL.flux, width: 1.3 },
-      { label: "Baseline", stroke: PAL.base, width: 1 },
-      { label: "Alert threshold", stroke: PAL.thr, width: 1, dash: [4, 4] } ],
+      { label: "SoLEXS flux", stroke: "#16202C", width: 1.3 },
+      { label: "Baseline", stroke: "#2E5EAA", width: 1 },
+      { label: "Alert threshold", stroke: "#C1622E", width: 1, dash: [4, 4] } ],
   }, fluxData, el);
   S.chartHel = new uPlot({
     width: elH.clientWidth, height: 90, tzDate, legend: { show: false },
     cursor: { drag: { x: false, y: false }, sync },
     scales: { x: { time: true }, y: { auto: true } },
     axes: [ { ...axis, show: false }, { ...axis, size: 70, label: "HEL1OS counts/s" } ],
-    series: [ {}, { label: "HEL1OS (smoothed)", stroke: PAL.hel, width: 1.1, fill: PAL.helFill } ],
+    series: [ {}, { label: "HEL1OS (smoothed)", stroke: "#5B8F8A", width: 1.1, fill: "rgba(91,143,138,0.16)" } ],
   }, helData, elH);
 }
 
@@ -624,7 +563,9 @@ async function refresh() {
     }
   } catch (err) {
     if (S.ctl !== ctl) return;                                   // superseded by a newer request
-    markNoData("Could not reach the Knoxis API at " + API + ". Is the backend running? (" + errText(err) + ")");
+    markNoData(err && err.http
+      ? "The Knoxis API returned an error: " + errText(err)
+      : "Could not reach the Knoxis API at " + API + ". Is the backend running? (" + errText(err) + ")");
   }
 }
 
@@ -754,35 +695,12 @@ $("sel-day").addEventListener("change", e => {
   refresh().then(loadEvaluation);
 });
 
-/* ---------- theme ---------- */
-function storedTheme() { try { const t = localStorage.getItem("knoxis-theme"); return t === "dark" || t === "light" ? t : null; } catch (_) { return null; } }
-
-function applyTheme(t, persist) {
-  document.documentElement.setAttribute("data-theme", t);
-  if (persist) { try { localStorage.setItem("knoxis-theme", t); } catch (_) {} }
-  const b = $("btn-theme");
-  b.textContent = t === "dark" ? "Light mode" : "Dark mode";
-  b.setAttribute("aria-label", t === "dark" ? "Switch to light mode" : "Switch to dark mode");
-  readPalette();
-  if (S.chart && S.chartHel) {                              // canvas colours are fixed at build time, so rebuild with the same data
-    const fd = S.chart.data, hd = S.chartHel.data, hel = $("chart-hel"), prev = hel.style.display;
-    hel.style.display = "";                                 // measure the HEL1OS panel even if it is hidden right now
-    buildCharts(fd, hd);
-    hel.style.display = prev;
-  }
-}
-
-$("btn-theme").addEventListener("click", () => {
-  applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
-});
-if (window.matchMedia) {                                    // follow the OS setting until the user picks one
-  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", e => { if (!storedTheme()) applyTheme(e.matches ? "dark" : "light", false); });
-}
-applyTheme(document.documentElement.getAttribute("data-theme") || "light", false);
-
 /* ---------- start ---------- */
 (async () => {
   API = await resolveApi();
+  if (API) {                                              // production servers hide the diagnostics panel
+    try { if ((await api("/health")).production) $("sec-diag").hidden = true; } catch (_) {}
+  }
   await loadDays(true);
   await refresh();
   loadEvaluation();

@@ -52,6 +52,29 @@ TRUTH_FILE_PATH = Path(os.environ.get("KNOXIS_TRUTH_FILE", "data/truth/noaa_even
 DASHBOARD_FILE = Path(os.environ.get(
     "KNOXIS_DASHBOARD_FILE", str(Path(__file__).resolve().parent.parent / "dashboard" / "index.html")))
 
+# ---- production ---------------------------------------------------------------------------------
+# KNOXIS_PRODUCTION=1 turns off /docs, hides server paths from responses, restricts CORS and hosts, and
+# puts /diagnostics behind KNOXIS_ADMIN_TOKEN (sent as the X-Admin-Token header).
+PRODUCTION = os.environ.get("KNOXIS_PRODUCTION", "0") == "1"
+ADMIN_TOKEN = os.environ.get("KNOXIS_ADMIN_TOKEN", "")
+_DOMAIN_ORIGINS = "https://knoxis.in,https://www.knoxis.in"
+CORS_ORIGINS = [o.strip() for o in os.environ.get("KNOXIS_CORS_ORIGINS", _DOMAIN_ORIGINS if PRODUCTION else "*").split(",") if o.strip()]
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get(
+    "KNOXIS_ALLOWED_HOSTS", "knoxis.in,www.knoxis.in,127.0.0.1,localhost" if PRODUCTION else "*").split(",") if h.strip()]
+# Requests per minute per client IP (0 = off). Per-IP counting needs uvicorn --proxy-headers behind nginx.
+RATE_LIMIT_PER_MIN = int(os.environ.get("KNOXIS_RATE_LIMIT_PER_MIN", "240" if PRODUCTION else "0"))
+# How many engine builds may be running or waiting at once; further requests get 503 instead of queueing forever.
+MAX_BUILD_QUEUE = int(os.environ.get("KNOXIS_MAX_BUILD_QUEUE", "6"))
+# The day index is re-checked against the folder at most this often (seconds).
+SCAN_TTL_S = float(os.environ.get("KNOXIS_SCAN_TTL_S", "5"))
+INDEX_FILE_PATH = Path(os.environ.get("KNOXIS_INDEX_FILE", str(DAYS_DIR / ".knoxis_index.json")))
+
+
+def shown(path) -> str:
+    """A path as it may appear in a response: full in development, file name only in production."""
+    return Path(path).name if PRODUCTION else str(path)
+
+
 DEFAULT_THRESHOLDS = {"watch": 0.3, "warning": 0.5, "alert": 0.7}
 LEVELS = ["QUIET", "WATCH", "WARNING", "ALERT"]
 LEVEL_CODE = {name: i for i, name in enumerate(LEVELS)}

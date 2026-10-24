@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from api.config import METRICS_FILE_PATH, SUSTAIN_MINUTES, TRUTH_FILE_PATH
+from api.config import METRICS_FILE_PATH, SUSTAIN_MINUTES, TRUTH_FILE_PATH, shown
 from api.snapshot import Snapshot
 from api.timeutil import utc
 
@@ -100,18 +100,18 @@ def compute_evaluation(snap: Snapshot) -> dict:
     try:
         out["vs_truth"] = _vs_truth(snap)
     except Exception as exc:
-        out["vs_truth"] = {"error": f"{type(exc).__name__}: {exc}"}
+        out["vs_truth"] = {"error": "truth catalog could not be evaluated"}
     batch = None
     if METRICS_FILE_PATH.exists():
         try:
             batch = json.loads(METRICS_FILE_PATH.read_text())
         except Exception as exc:
-            batch = {"error": f"metrics file unreadable: {exc}"}
+            batch = {"error": "metrics file unreadable"}
     out["batch"] = batch
     notes = []
     if out["vs_truth"] is None:
-        notes.append(f"No truth catalog at {TRUTH_FILE_PATH}; hit rate, false alarms and latency are not computed.")
+        notes.append(f"No truth catalog ({shown(TRUTH_FILE_PATH)}); hit rate, false alarms and latency are not computed.")
     if batch is None:
-        notes.append(f"No metrics file at {METRICS_FILE_PATH}; forecast skill against baselines is not shown.")
+        notes.append(f"No metrics file ({shown(METRICS_FILE_PATH)}); forecast skill against baselines is not shown.")
     out["notes"] = notes
     return out

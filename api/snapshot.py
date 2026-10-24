@@ -24,6 +24,7 @@ import os
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -33,7 +34,8 @@ import pandas as pd
 from fastapi import HTTPException
 
 from api.daystore import day_store
-from api.config import DATA_FILE_PATH, FEATURE_COLUMNS, PENDING_AFTER_PEAK_MIN, REPLAY_MODE
+from api.config import (DATA_FILE_PATH, FEATURE_COLUMNS, MAX_BUILD_QUEUE, PENDING_AFTER_PEAK_MIN, PRODUCTION, REPLAY_MODE,
+                        shown)
 from api.state import runtime
 from api.timeutil import align, py_dt
 from forecast.pipeline.compute_features import compute_day_features
@@ -41,6 +43,26 @@ from forecast.pipeline.compute_features import compute_day_features
 log = logging.getLogger("knoxis.api")
 
 _build_lock = threading.Lock()
+PRODUCTION_HIDE = PRODUCTION  # keep exception text out of production responses
+_queue_lock = threading.Lock()
+_queued = 0
+
+
+@contextmanager
+def build_slot():
+    """Serialises engine work, and refuses to queue more than MAX_BUILD_QUEUE requests behind it, so a
+    burst of requests for uncached days cannot pile up unboundedly."""
+    global _queued
+    with _queue_lock:
+        if _queued >= MAX_BUILD_QUEUE:
+            raise HTTPException(503, "The server is busy computing other days. Try again in a few seconds.")
+        _queued += 1
+    try:
+        with _build_lock:
+            yield
+    finally:
+        with _queue_lock:
+            _queued -= 1
 
 
 @dataclass
@@ -58,16 +80,16 @@ def stat_data_file() -> os.stat_result:
     try:
         return DATA_FILE_PATH.stat()
     except FileNotFoundError:
-        raise HTTPException(503, f"Data file not found at {DATA_FILE_PATH}. No live data source configured.")
+        raise HTTPException(503, f"Data file not found ({shown(DATA_FILE_PATH)}). No live data source configured.")
 
 
 def load_current_data() -> pd.DataFrame:
     try:
         df = pd.read_parquet(DATA_FILE_PATH)
     except FileNotFoundError:
-        raise HTTPException(503, f"Data file not found at {DATA_FILE_PATH}.")
+        raise HTTPException(503, f"Data file not found ({shown(DATA_FILE_PATH)}).")
     except Exception as exc:
-        raise HTTPException(503, f"Data file unreadable: {exc}") from exc
+        raise HTTPException(503, "Data file unreadable." if PRODUCTION_HIDE else f"Data file unreadable: {exc}") from exc
     if df.index.name != "timestamp" and "timestamp" in df.columns:
         df = df.set_index("timestamp")
     return df.sort_index()
@@ -249,7 +271,7 @@ class LRUCache:
         hit = self._lookup(key)
         if hit is not None:
             return hit
-        with _build_lock:
+        with build_slot():
             hit = self._lookup(key)          # built by someone else while we waited
             if hit is not None:
                 return hit
@@ -382,7 +404,7 @@ def _parse_as_of(as_of: str) -> pd.Timestamp:
 
 
 def get_day_snapshot(day: str, as_of: Optional[str]) -> Snapshot:
-    sig = day_store.signature()
+    sig = day_store.signature_for(day)
     entry = _day_cache.get(("day", day, sig), lambda: build_day_entry(day))
     if not as_of:
         return entry.view

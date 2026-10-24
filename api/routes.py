@@ -5,10 +5,13 @@ import json
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+import hmac
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from api.config import DASHBOARD_FILE, DATA_FILE_PATH, DAYS_DIR, LEADIN_HOURS, METRICS_FILE_PATH
+from api.config import (ADMIN_TOKEN, DASHBOARD_FILE, DATA_FILE_PATH, DAYS_DIR, LEADIN_HOURS, METRICS_FILE_PATH,
+                        PRODUCTION, shown)
 from api.daystore import day_store
 from api.schemas import (DaysResponse, FlareHistoryResponse, ForecastResponse, HealthResponse,
                          NowcastResponse, StatusResponse, TimeseriesResponse)
@@ -25,6 +28,15 @@ from api.timeutil import py_dt
 
 router = APIRouter()
 
+
+def require_admin(request: Request) -> None:
+    """In production, /diagnostics (which lists server paths and configuration) needs the admin token."""
+    if not PRODUCTION:
+        return
+    sent = request.headers.get("x-admin-token", "")
+    if not ADMIN_TOKEN or not hmac.compare_digest(sent, ADMIN_TOKEN):
+        raise HTTPException(404, "Diagnostics are disabled on this server.")
+
 AsOf = Query(None, description="ISO timestamp. Replays the system using only data up to this time.")
 Day = Query(None, description="UTC date, YYYY-MM-DD. Selects a day from the archive instead of the live file.")
 
@@ -34,7 +46,7 @@ def dashboard():
     """Serves the dashboard from the API itself, so it is same-origin (no CORS, no second server)."""
     if not DASHBOARD_FILE.exists():
         return JSONResponse(status_code=404, content={
-            "detail": f"Dashboard file not found at {DASHBOARD_FILE}. Start uvicorn from the repo root "
+            "detail": f"Dashboard file not found ({shown(DASHBOARD_FILE)}). Start uvicorn from the repo root "
                       "or set KNOXIS_DASHBOARD_FILE."})
     return FileResponse(DASHBOARD_FILE, media_type="text/html")
 
@@ -43,10 +55,10 @@ def dashboard():
 def days():
     """Days available in the archive folder (UTC dates), and whether a live file exists."""
     return DaysResponse(days=day_store.scan(), live_available=DATA_FILE_PATH.exists(),
-                        days_dir=str(DAYS_DIR), leadin_hours=LEADIN_HOURS)
+                        days_dir=shown(DAYS_DIR), leadin_hours=LEADIN_HOURS)
 
 
-@router.get("/diagnostics")
+@router.get("/diagnostics", dependencies=[Depends(require_admin)])
 def diagnostics():
     """Checklist of what is configured and what is missing, with a hint for each failure."""
     return run_diagnostics()
@@ -61,7 +73,7 @@ def evaluation(day: Optional[str] = Day):
 
 @router.get("/health", response_model=HealthResponse)
 def health():
-    return HealthResponse(status="ok", model_loaded=runtime.model is not None,
+    return HealthResponse(status="ok", production=PRODUCTION, model_loaded=runtime.model is not None,
                           data_file_accessible=DATA_FILE_PATH.exists(), checked_at=datetime.now(timezone.utc))
 
 
@@ -105,8 +117,8 @@ def metrics():
     """Evaluation results written by an offline batch job (persistence baseline, bootstrap CIs,
     hit/false-alarm rates, latency, calibration residuals). Schema is whatever that job writes."""
     if not METRICS_FILE_PATH.exists():
-        return {"available": False, "detail": f"No metrics file at {METRICS_FILE_PATH}."}
+        return {"available": False, "detail": f"No metrics file ({shown(METRICS_FILE_PATH)})."}
     try:
         return {"available": True, "metrics": json.loads(METRICS_FILE_PATH.read_text())}
     except Exception as exc:
-        raise HTTPException(503, f"Metrics file unreadable: {exc}") from exc
+        raise HTTPException(503, "Metrics file unreadable.") from exc
