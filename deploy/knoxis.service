@@ -1,0 +1,26 @@
+[Unit]
+Description=Knoxis API (uvicorn, one worker)
+After=network.target
+
+[Service]
+User=knoxis
+Group=knoxis
+WorkingDirectory=/srv/knoxis/app
+EnvironmentFile=/etc/knoxis.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+# One worker on purpose: the snapshot and day caches are in-process, so more workers would each rebuild
+# and hold their own copy. --proxy-headers makes the per-IP rate limit see the real client address behind nginx.
+ExecStart=/srv/knoxis/venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8100 --workers 1 \
+          --proxy-headers --forwarded-allow-ips 127.0.0.1 --timeout-keep-alive 15 --log-level info
+Restart=always
+RestartSec=3
+
+# Hardening: read-only system, writable only where the day index is saved.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/knoxis/data
+
+[Install]
+WantedBy=multi-user.target
